@@ -1,63 +1,63 @@
 {
-   "pluginAlias":"SMAHomeManager",
-   "pluginType":"accessory",
-   "singular":true,
-   "headerDisplay":null,
-   "schema":{
-      "type":"object",
-      "properties":{
-          "name":{
-             "title":"Accessory Name",
-             "type":"string",
-             "format":"string",
-             "default":"SMA Inverter",
-             "description":"The name of your device to show in the Home app",
-             "minLength": 1,
-             "required": true
-          },
-          "hostname":{
-             "title":"SMA Inverter Hostname",
-             "type":"string",
-             "format":"string",
-             "description":"The hostname of your device (e.g. sma1992XXXXXX.local) or the IP address (e.g. 192.168.1.32)",
-             "minLength": 1,
-             "required": true
-          },
-         "debug":{
-            "title":"Debug logging",
-            "type":"boolean",
-            "description":"Turns on additional logging (can be helpful for diagnosing issues)"
+  "pluginAlias": "SMAHomeManager",
+  "pluginType": "accessory",
+  "singular": true,
+  "headerDisplay": null,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Accessory Name",
+        "type": "string",
+        "format": "string",
+        "default": "SMA Inverter",
+        "description": "The name of your device to show in the Home app",
+        "minLength": 1,
+        "required": true
+      },
+      "hostname": {
+        "title": "SMA Inverter Hostname",
+        "type": "string",
+        "format": "string",
+        "description": "The hostname of your device (e.g. sma1992XXXXXX.local) or the IP address (e.g. 192.168.1.32)",
+        "minLength": 1,
+        "required": true
+      },
+      "debug": {
+        "title": "Debug logging",
+        "type": "boolean",
+        "description": "Turns on additional logging (can be helpful for diagnosing issues)"
+      },
+      "refreshInterval": {
+        "title": "Refresh interval (minutes)",
+        "type": "integer",
+        "default": 1
+      }
+    }
+  },
+  "layout": [
+    {
+      "type": "flex",
+      "flex-flow": "row wrap",
+      "items": [
+        {
+          "key": "name",
+          "type": "string"
         },
-         "refreshInterval":{
-            "title":"Refresh interval (minutes)",
-            "type":"integer",
-            "default": 1
-         }
-      }
-   },
-   "layout":[
-       {
-          "type":"flex",
-          "flex-flow":"row wrap",
-          "items":[
-              {
-                 "key":"name",
-                 "type":"string"
-              },
-              {
-                 "key":"hostname",
-                 "type":"string"
-              }
-          ]
-       },
-      {
-         "type":"fieldset",
-         "title":"Advanced configuration",
-         "expandable":true,
-         "items":[
-            "debug",
-            "refreshInterval"
-         ]
-      }
-   ]
+        {
+          "key": "hostname",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Advanced configuration",
+      "expandable": true,
+      "items": [
+        "debug",
+        "refreshInterval"
+      ]
+    }
+  ]
 }
