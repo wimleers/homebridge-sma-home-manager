@@ -12,10 +12,10 @@ module.exports = function(homebridge) {
 	Characteristic = homebridge.hap.Characteristic;
 	Accessory = homebridge.hap.Accessory;
 
-	homebridge.registerAccessory("homebridge-sma-inverter", "SMAInverter", SMAInverter);
+	homebridge.registerAccessory("homebridge-sma-home-manager", "SMAHomeManager", SMAHomeManager);
 };
 
-function SMAInverter(log, config) {
+function SMAHomeManager(log, config) {
 	this.log = log;
 	this.name = config["name"] || "SMA Solar Inverter";
 	this.hostname = config["hostname"];
@@ -98,7 +98,7 @@ function SMAInverter(log, config) {
 	}.bind(this), this.refreshInterval);
 }
 
-SMAInverter.prototype = {
+SMAHomeManager.prototype = {
 
 	identify: function(callback) {
 		this.log("identify");

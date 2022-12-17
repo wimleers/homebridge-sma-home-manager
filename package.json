@@ -31,7 +31,7 @@
   ],
   "license": "MIT",
   "main": "index.js",
-  "name": "@wimleers/homebridge-sma-inverter",
+  "name": "homebridge-sma-home-manager",
   "displayName": "SMA Home Manager",
   "repository": {
     "type": "git",
