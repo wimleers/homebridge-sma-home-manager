@@ -5,39 +5,30 @@
 
 <span align="center">
   
-[![npm](https://badgen.net/npm/v/homebridge-sma-inverter/latest?icon=npm&label)](https://www.npmjs.com/package/homebridge-sma-inverter)
-[![npm](https://badgen.net/npm/dt/homebridge-sma-inverter?label=downloads)](https://www.npmjs.com/package/homebridge-sma-inverter)
+[![npm](https://badgen.net/npm/v/homebridge-sma-home-manager/latest?icon=npm&label)](https://www.npmjs.com/package/homebridge-sma-home-manager)
+[![npm](https://badgen.net/npm/dt/homebridge-sma-home-manager?label=downloads)](https://www.npmjs.com/package/homebridge-sma-home-manager)
   
 </span>
 
-# Update
-HomeKit does not support non-traditional smart home devices, like Inverters, very well. I have started using Home Assistant for my SMA Inverter, so am ending support for this plug-in.
+# homebridge-sma-home-manager
 
-# homebridge-sma-inverter
-Homebridge plugin to display readings from ModBus enabled SMA Solar Inverters.
+Homebridge plugin to:
 
-# Installation
-1. Install Homebridge via these [instructions](https://github.com/homebridge/homebridge/wiki/Install-Homebridge-on-Raspbian).
-2. Install `homebridge-sma-inverter` plug-in via the Homebridge UI 'plugins' tab search function or via the following command:
-```shell
-sudo npm install -g homebridge-sma-inverter
-```
-3. Update your configuration file. There are two methods using Homebridge UI:
-   1. Find `homebridge-sma-inverter` on the 'Plugins' tab, click `SETTINGS` and fill out the pop-up.
-   2. Copy and paste the following into your `config.json` via the 'Config' tab:
-   ```json
-        {
-            "name": "SMA Inverter",
-            "hostname": "192.168.0.32",
-            "refreshInterval": 1,
-            "accessory": "SMAInverter"
-        }
-   ```
+1. integrate your home with SMA inverters: live (every 10 s) `W` produced & today's cumulative `kWh` (virtual `outlets`)
+2. integrate your home with SMA Home Manager: net `W` produced/consumed, both live (every s) and averaged over the past 3 minutes (virtual outlets)
+3. configure "surplus PV" signals (virtual outlets) that make it easy to consume surplus PV energy: a certain number of `W` available for a certain number of minutes (taking into account base load variability)
+
+Requires:
+
+- SMA inverter with the ModBus setting enabled (it's off by default)
+- SMA Home Manager 2.0 (optional: without this, 2 & 3 just won't work)
+
+All 100% local, no internet access needed.
+
 
 # Credit
-1. [codyc1515](https://github.com/codyc1515) for the creation and development of the plug-in.
-2. [tritter](https://github.com/tritter) for updating dependencies.
-3. [mitch7391](https://github.com/mitch7391) for creating a README, CHANGELOG and ISSUE templates.
 
-# License
-This plugin is distributed under the MIT license. See [LICENSE](https://github.com/codyc1515/homebridge-sma-inverter/blob/master/LICENSE) for details.
+This was forked from <https://github.com/codyc1515/homebridge-sma-inverter>. Differences:
+
+- Omitted the Eve-based history support which didn't quite work. Recommended alternative: [`sbfspot`](https://github.com/SBFspot/SBFspot) <sup>[`Docker` image](https://github.com/nakla/sbfspot)</sup> (which reads data locally, also via ModBus), and optionally upload let it upload your production data to <https://pvoutput.org> (easy to use UI)
+- Omitted the "Total". Observe that in SMA's `SMA Energy` app.
