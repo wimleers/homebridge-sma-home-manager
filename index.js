@@ -5,14 +5,12 @@ const inherits = require("util").inherits,
 
 var client = new ModbusRTU();
 
-var Service, Characteristic, Accessory, FakeGatoHistoryService;
+var Service, Characteristic, Accessory;
 
 module.exports = function(homebridge) {
 	Service = homebridge.hap.Service;
 	Characteristic = homebridge.hap.Characteristic;
 	Accessory = homebridge.hap.Accessory;
-
-	FakeGatoHistoryService = require('fakegato-history')(homebridge);
 
 	homebridge.registerAccessory("homebridge-sma-inverter", "SMAInverter", SMAInverter);
 };
@@ -170,7 +168,6 @@ SMAInverter.prototype = {
 
 					// Eve - Watts
 					this.lightSensorCurrently.getCharacteristic(Characteristic.CustomWatts).updateValue(data.buffer.readUInt32BE());
-					this.loggingService.addEntry({time: moment().unix(), power: data.buffer.readUInt32BE()});
 
 					if(data.buffer.readUInt32BE() > 0) {
 						if(this.debug) {this.log("Device status", "On");}
@@ -252,8 +249,6 @@ SMAInverter.prototype = {
 				minStep: 0.0001
 			});
 
-		this.loggingService = new FakeGatoHistoryService("energy", Accessory);
-
 		this.informationService = new Service.AccessoryInformation();
 		this.informationService
 			.setCharacteristic(Characteristic.Name, this.value.Name)
@@ -265,7 +260,6 @@ SMAInverter.prototype = {
 			this.lightSensorCurrently,
 			this.lightSensorToday,
 			this.lightSensorTotal,
-			this.loggingService,
 			this.informationService
 		];
 	},

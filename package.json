@@ -9,7 +9,6 @@
     "url": "https://github.com/wimleers/homebridge-sma-home-manager/issues"
   },
   "dependencies": {
-    "fakegato-history": "^0.5.5",
     "modbus-serial": "^7.7.3",
     "moment": "^2.24.0",
     "utils": "^0.3.1"
