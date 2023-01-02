@@ -1,7 +1,6 @@
 const inherits = require("util").inherits,
 	moment = require('moment'),
-	ModbusRTU = require("modbus-serial"),
-	dns = require("dns");
+	ModbusRTU = require("modbus-serial");
 
 var client = new ModbusRTU();
 
@@ -18,7 +17,8 @@ module.exports = function(homebridge) {
 function SMAHomeManager(log, config) {
 	this.log = log;
 	this.name = config["name"] || "SMA Solar Inverter";
-	this.hostname = config["hostname"];
+	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
+	this.address = '169.254.12.3';
 	this.refreshInterval = (config['refreshInterval'] * 1000) || 1000;
 	this.debug = config["debug"] || false;
 
@@ -106,22 +106,15 @@ SMAHomeManager.prototype = {
 	},
 
 	_connect: function(isInitial) {
-		if(this.debug) {this.log("Attempting connection", this.hostname);}
+		if(this.debug) {this.log("Attempting connection", this.address);}
 
-		// Get the hostname from dns - note: IPv4 support only for currently, have not tested IPv6
+		// Connect to the ModBus server IP address
 		try {
-			dns.resolve(this.hostname, "A", function (err, addresses, family) {
-				// Connect to the ModBus server hostname
-				if(!err) {client.connectTCP(addresses[0]);}
-				else {client.connectTCP(this.hostname);}
-			}.bind(this));
+			client.connectTCP(this.address);
 		}
 		catch(err) {
-			this.log("Failed to resolve DNS hostname - maybe this is an IP address?", err);
-
-			// Connect to the ModBus server IP address
-			try {client.connectTCP(this.hostname);}
-			catch(err) {this.log("Connection attempt failed");}
+			this.log("Connection attempt failed");
+			return;
 		}
 
 		try {

@@ -15,14 +15,6 @@
         "minLength": 1,
         "required": true
       },
-      "hostname": {
-        "title": "SMA Inverter Hostname",
-        "type": "string",
-        "format": "string",
-        "description": "The hostname of your device (e.g. sma1992XXXXXX.local) or the IP address (e.g. 192.168.1.32)",
-        "minLength": 1,
-        "required": true
-      },
       "debug": {
         "title": "Debug logging",
         "type": "boolean",
@@ -42,10 +34,6 @@
       "items": [
         {
           "key": "name",
-          "type": "string"
-        },
-        {
-          "key": "hostname",
           "type": "string"
         }
       ]
