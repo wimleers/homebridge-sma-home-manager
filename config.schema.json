@@ -23,16 +23,6 @@
         "minLength": 1,
         "required": true
       },
-      "inverterToday": {
-        "title": "Expose inverter's production of today",
-        "type": "boolean",
-        "default": false
-      },
-      "inverterTotal": {
-        "title": "Expose inverter's total production",
-        "type": "boolean",
-        "default": false
-      },
       "debug": {
         "title": "Debug logging",
         "type": "boolean",
@@ -58,15 +48,6 @@
           "key": "hostname",
           "type": "string"
         }
-      ]
-    },
-    {
-      "type": "fieldset",
-      "title": "Optional functionality",
-      "expandable": true,
-      "items": [
-        "inverterToday",
-        "inverterTotal"
       ]
     },
     {

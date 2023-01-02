@@ -21,8 +21,6 @@ function SMAHomeManager(log, config) {
 	this.hostname = config["hostname"];
 	this.refreshInterval = (config['refreshInterval'] * 1000) || 60000;
 	this.debug = config["debug"] || false;
-	this.inverterToday = config["inverterToday"] || false;
-	this.inverterTotal = config["inverterTotal"] || false;
 
 	this.value = [];
 	this.value.Name = config["name"] || '';
@@ -162,57 +160,43 @@ SMAHomeManager.prototype = {
 			client.readHoldingRegisters(30057, 10, function(err, data) {this.value.SerialNumber = data.buffer.readUInt32BE();}.bind(this));
 			*/
 
-			// Currently - Light Sensor
 			client.readHoldingRegisters(30775, 10, function(err, data) {
 				// Check if the value is unrealistic (the inverter is not generating)
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-					this.lightSensorCurrently.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
+					const solarWatts = data.buffer.readUInt32BE();
+					if(this.debug) {this.log('Current production:', solarWatts, 'Watt');}
+					this.inverter.getCharacteristic(Characteristic.On).updateValue(solarWatts > 0);
 
 					// Eve - Watts
-					this.lightSensorCurrently.getCharacteristic(Characteristic.CustomWatts).updateValue(data.buffer.readUInt32BE());
+					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(solarWatts);
 
-					if(data.buffer.readUInt32BE() > 0) {
-						if(this.debug) {this.log("Device status", "On");}
-						
-						// Today - Light Sensor
-						if (this.inverterToday) {
-							client.readHoldingRegisters(30535, 10, function(err, data) {
-								if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-									this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
-								}
-							}.bind(this));
-						}
-
-						client.readHoldingRegisters(30529, 10, function(err, data) {
+					// Only when solar panels are currently producing do we need to update today's production.
+					if (solarWatts > 0) {
+						client.readHoldingRegisters(30535, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								// Eve - kWh
-								this.lightSensorCurrently.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
-								// All Time - Light Sensor
-								if (this.inverterTotal) {
-									this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
-								}
+								this.inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
 							}
 						}.bind(this));
 
-						// Amperes - FakeGato
+						// Eve - Amperes
 						client.readHoldingRegisters(30977, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.lightSensorCurrently.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
+								this.inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
 							}
 						}.bind(this));
 
-						// Volts - FakeGato
+						// Eve - Volts
 						client.readHoldingRegisters(30783, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*100) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.lightSensorCurrently.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
+								this.inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
 							}
 						}.bind(this));
 					}
-					else if (this.debug) {this.log("Device status", "Off - low value");}
 				}
 				else {
 					if(this.debug) {this.log("Device status", "Off - unreasonable value");}
-					this.lightSensorCurrently.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(0.0001);
+					this.inverter.getCharacteristic(Characteristic.On).updateValue(false);
+					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
 				}
 			}.bind(this));
 		}
@@ -225,40 +209,11 @@ SMAHomeManager.prototype = {
 	},
 
 	getServices: function() {
-		this.lightSensorCurrently = new Service.LightSensor(this.name + " Currently", "currently");
-		this.lightSensorCurrently.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
-			.setProps({
-				unit: "kWh",
-				minValue: 0,
-				maxValue: 100000,
-				minStep: 0.0001
-			});
-		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomAmperes);
-		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomKilowattHours);
-		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomVolts);
-		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomWatts);
-
-		if (this.inverterToday) {
-			this.lightSensorToday = new Service.LightSensor(this.name + " Today", "today");
-			this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
-				.setProps({
-					unit: "kWh",
-					minValue: 0,
-					maxValue: 100000,
-					minStep: 0.0001
-				});
-		}
-
-		if (this.inverterTotal)	 {
-			this.lightSensorTotal = new Service.LightSensor(this.name + " Total", "total");
-			this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
-				.setProps({
-					unit: "kWh",
-					minValue: 0,
-					maxValue: 100000,
-					minStep: 0.0001
-				});
-		}
+		this.inverter = new Service.Outlet(this.name);
+		this.inverter.addCharacteristic(Characteristic.CustomAmperes);
+		this.inverter.addCharacteristic(Characteristic.CustomKilowattHours);
+		this.inverter.addCharacteristic(Characteristic.CustomVolts);
+		this.inverter.addCharacteristic(Characteristic.CustomWatts);
 
 		this.informationService = new Service.AccessoryInformation();
 		this.informationService
@@ -268,9 +223,7 @@ SMAHomeManager.prototype = {
 			.setCharacteristic(Characteristic.SerialNumber, this.value.SerialNumber);
 
 		return [
-			this.lightSensorCurrently,
-			this.lightSensorToday,
-			this.lightSensorTotal,
+			this.inverter,
 			this.informationService
 		];
 	},
