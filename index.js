@@ -132,6 +132,29 @@ SMAHomeManager.prototype = {
 			client.readHoldingRegisters(30057, 10, function(err, data) {this.value.SerialNumber = data.buffer.readUInt32BE();}.bind(this));
 			*/
 
+			// Inverter: StatusActive & StatusFault characteristics
+			client.readHoldingRegisters(30201, 10, function(err, data) {
+				const condition = data.buffer.readUInt32BE();
+				// 35 = Fault
+				if (condition === 35) {
+					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(false);
+					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
+				}
+				// 455 = Warning
+				else if (condition === 455) {
+					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(True);
+					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
+				}
+				// 303 = Off, 307 = Ok
+				else {
+					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.NO_FAULT);
+					if (condition !== 303 && condition !== 307) {
+						this.log('Unknown inverter condition', condition);
+					}
+					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(condition === 307);
+				}
+			}.bind(this));
+
 			client.readHoldingRegisters(30775, 10, function(err, data) {
 				// Check if the value is unrealistic (the inverter is not generating)
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
@@ -184,6 +207,8 @@ SMAHomeManager.prototype = {
 		this.inverter = new Service.Outlet(this.name);
 		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
 		this._makeReadonly(this.inverter.getCharacteristic(Characteristic.On));
+		this.inverter.addCharacteristic(Characteristic.StatusActive);
+		this.inverter.addCharacteristic(Characteristic.StatusFault);
 		this.inverter.addCharacteristic(Characteristic.CustomAmperes);
 		this.inverter.addCharacteristic(Characteristic.CustomKilowattHours);
 		this.inverter.addCharacteristic(Characteristic.CustomVolts);
