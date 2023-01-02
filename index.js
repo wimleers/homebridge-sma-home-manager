@@ -24,8 +24,6 @@ function SMAHomeManager(log, config) {
 
 	this.value = [];
 	this.value.Name = config["name"] || '';
-	this.value.Manufacturer = "";
-	this.value.Model = "";
 	this.value.FirmwareRevision = "1.0.0";
 	this.value.SerialNumber = "";
 
@@ -130,25 +128,6 @@ SMAHomeManager.prototype = {
 		// Obtain the values
 		try {
 			/*
-			// Manufacturer
-			client.readHoldingRegisters(30051, 10, function(err, data) {
-				switch(data.buffer.readUInt32BE()) {
-					case "8001": this.value.Manufacturer = "SMA Solar Inverter"; break;
-					default: this.value.Manufacturer = "Unknown"; break;
-				}
-			}.bind(this));
-
-			// Model
-			client.readHoldingRegisters(30053, 10, function(err, data) {
-				switch(data.buffer.readUInt32BE()) {
-					case "9319" : this.value.Model = "Sunny Boy 3.0"; break;
-					case "9320" : this.value.Model = "Sunny Boy 3.6"; break;
-					case "9321" : this.value.Model = "Sunny Boy 4.0"; break;
-					case "9322" : this.value.Model = "Sunny Boy 5.0"; break;
-					default: this.value.Model = "Sunny Boy"; break;
-				}
-			}.bind(this));
-
 			// Serial Number
 			client.readHoldingRegisters(30057, 10, function(err, data) {this.value.SerialNumber = data.buffer.readUInt32BE();}.bind(this));
 			*/
@@ -213,8 +192,9 @@ SMAHomeManager.prototype = {
 		this.informationService = new Service.AccessoryInformation();
 		this.informationService
 			.setCharacteristic(Characteristic.Name, this.value.Name)
-			.setCharacteristic(Characteristic.Manufacturer, this.value.Manufacturer)
-			.setCharacteristic(Characteristic.Model, this.value.Model)
+			// @see https://github.com/homebridge/HAP-NodeJS/issues/940#issuecomment-1111470278
+			.setCharacteristic(Characteristic.Manufacturer, 'SMA Solar Technology AG')
+			.setCharacteristic(Characteristic.Model, 'Sunny Boy')
 			.setCharacteristic(Characteristic.SerialNumber, this.value.SerialNumber);
 
 		return [
