@@ -29,7 +29,7 @@
         "description": "Turns on additional logging (can be helpful for diagnosing issues)"
       },
       "refreshInterval": {
-        "title": "Refresh interval (minutes)",
+        "title": "Refresh interval (seconds)",
         "type": "integer",
         "default": 1
       }

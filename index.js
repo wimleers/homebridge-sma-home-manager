@@ -19,7 +19,7 @@ function SMAHomeManager(log, config) {
 	this.log = log;
 	this.name = config["name"] || "SMA Solar Inverter";
 	this.hostname = config["hostname"];
-	this.refreshInterval = (config['refreshInterval'] * 1000) || 60000;
+	this.refreshInterval = (config['refreshInterval'] * 1000) || 1000;
 	this.debug = config["debug"] || false;
 
 	this.value = [];
