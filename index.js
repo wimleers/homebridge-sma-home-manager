@@ -17,7 +17,7 @@ module.exports = function(homebridge) {
 function SMAHomeManager(log, config) {
 	// General.
 	this.log = log;
-	this.name = config["name"] || "SMA Solar Inverter";
+	this.name = config["name"] || "Solar Panels";
 	this.debug = config["debug"] || false;
 
 	// Inverter: SMA Sunny Boy.

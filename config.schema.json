@@ -10,7 +10,7 @@
         "title": "Accessory Name",
         "type": "string",
         "format": "string",
-        "default": "SMA Inverter",
+        "default": "Solar panels",
         "description": "The name of your device to show in the Home app",
         "minLength": 1,
         "required": false
