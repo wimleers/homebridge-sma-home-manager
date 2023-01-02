@@ -423,6 +423,7 @@ const previousMovingAverage = this.movingAverage;
 
 	getServices: function() {
 		this.inverter = new Service.Outlet(this.name);
+		this._ensureAppropriateName(this.inverter);
 		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
 		this._makeReadonly(this.inverter.getCharacteristic(Characteristic.On));
 		this.inverter.addCharacteristic(Characteristic.StatusActive);
@@ -434,18 +435,22 @@ const previousMovingAverage = this.movingAverage;
 		this.inverter.setPrimaryService();
 
 		this.import = new Service.Outlet("Import", "import");
+		this._ensureAppropriateName(this.import);
 		this._makeReadonly(this.import.getCharacteristic(Characteristic.On));
 		this.import.addCharacteristic(Characteristic.CustomWatts);
 
 		this.export = new Service.Outlet("Export", "export");
+		this._ensureAppropriateName(this.export);
 		this._makeReadonly(this.export.getCharacteristic(Characteristic.On));
 		this.export.addCharacteristic(Characteristic.CustomWatts);
 
 		this.importRealtime = new Service.Outlet("Import real-time", "import-realtime");
+		this._ensureAppropriateName(this.importRealtime);
 		this._makeReadonly(this.importRealtime.getCharacteristic(Characteristic.On));
 		this.importRealtime.addCharacteristic(Characteristic.CustomWatts);
 
 		this.exportRealtime = new Service.Outlet("Export real-time", "export-realtime");
+		this._ensureAppropriateName(this.exportRealtime);
 		this._makeReadonly(this.exportRealtime.getCharacteristic(Characteristic.On));
 		this.exportRealtime.addCharacteristic(Characteristic.CustomWatts);
 
@@ -464,6 +469,14 @@ const previousMovingAverage = this.movingAverage;
 			this.exportRealtime,
 			this.informationService
 		];
+	},
+
+	// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
+	// @see https://github.com/homebridge/homebridge/issues/3281#issuecomment-1338868527
+	_ensureAppropriateName(service) {
+		service.addCharacteristic(Characteristic.ConfiguredName);
+		service.setCharacteristic(Characteristic.ConfiguredName, service.displayName);
+		this._makeReadonly(service.getCharacteristic(Characteristic.ConfiguredName));
 	},
 
 	_makeReadonly(characteristic) {
