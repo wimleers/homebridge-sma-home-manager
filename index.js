@@ -21,6 +21,8 @@ function SMAHomeManager(log, config) {
 	this.hostname = config["hostname"];
 	this.refreshInterval = (config['refreshInterval'] * 1000) || 60000;
 	this.debug = config["debug"] || false;
+	this.inverterToday = config["inverterToday"] || false;
+	this.inverterTotal = config["inverterTotal"] || false;
 
 	this.value = [];
 	this.value.Name = config["name"] || '';
@@ -173,17 +175,22 @@ SMAHomeManager.prototype = {
 						if(this.debug) {this.log("Device status", "On");}
 						
 						// Today - Light Sensor
-						client.readHoldingRegisters(30535, 10, function(err, data) {
-							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
-							}
-						}.bind(this));
+						if (this.inverterToday) {
+							client.readHoldingRegisters(30535, 10, function(err, data) {
+								if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+									this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
+								}
+							}.bind(this));
+						}
 
-						// All Time - Light Sensor
 						client.readHoldingRegisters(30529, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+								// Eve - kWh
 								this.lightSensorCurrently.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
-								this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
+								// All Time - Light Sensor
+								if (this.inverterTotal) {
+									this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel).updateValue(data.buffer.readUInt32BE() / 1000);
+								}
 							}
 						}.bind(this));
 
@@ -231,23 +238,27 @@ SMAHomeManager.prototype = {
 		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomVolts);
 		this.lightSensorCurrently.addCharacteristic(Characteristic.CustomWatts);
 
-		this.lightSensorToday = new Service.LightSensor(this.name + " Today", "today");
-		this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
-			.setProps({
-				unit: "kWh",
-				minValue: 0,
-				maxValue: 100000,
-				minStep: 0.0001
-			});
+		if (this.inverterToday) {
+			this.lightSensorToday = new Service.LightSensor(this.name + " Today", "today");
+			this.lightSensorToday.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
+				.setProps({
+					unit: "kWh",
+					minValue: 0,
+					maxValue: 100000,
+					minStep: 0.0001
+				});
+		}
 
-		this.lightSensorTotal = new Service.LightSensor(this.name + " Total", "total");
-		this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
-			.setProps({
-				unit: "kWh",
-				minValue: 0,
-				maxValue: 100000,
-				minStep: 0.0001
-			});
+		if (this.inverterTotal)	 {
+			this.lightSensorTotal = new Service.LightSensor(this.name + " Total", "total");
+			this.lightSensorTotal.getCharacteristic(Characteristic.CurrentAmbientLightLevel)
+				.setProps({
+					unit: "kWh",
+					minValue: 0,
+					maxValue: 100000,
+					minStep: 0.0001
+				});
+		}
 
 		this.informationService = new Service.AccessoryInformation();
 		this.informationService
