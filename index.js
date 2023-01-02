@@ -210,6 +210,8 @@ SMAHomeManager.prototype = {
 
 	getServices: function() {
 		this.inverter = new Service.Outlet(this.name);
+		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
+		this._makeReadonly(this.inverter.getCharacteristic(Characteristic.On));
 		this.inverter.addCharacteristic(Characteristic.CustomAmperes);
 		this.inverter.addCharacteristic(Characteristic.CustomKilowattHours);
 		this.inverter.addCharacteristic(Characteristic.CustomVolts);
@@ -227,6 +229,16 @@ SMAHomeManager.prototype = {
 			this.informationService
 		];
 	},
+
+	_makeReadonly(characteristic) {
+		const readonlyPerms = [
+			"pr" /* PAIRED_READ */,
+			"ev" /* NOTIFY */,
+		];
+		characteristic.setProps({
+			perms: characteristic.props.perms.filter(function (p) { return readonlyPerms.includes(p); })
+		});
+  },
 
 	_getValue: function(CharacteristicName, callback) {
 		if(this.debug) {this.log("GET", CharacteristicName);}
