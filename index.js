@@ -1,5 +1,4 @@
 const inherits = require("util").inherits,
-	moment = require('moment'),
 	ModbusRTU = require("modbus-serial");
 
 var client = new ModbusRTU();
@@ -19,13 +18,8 @@ function SMAHomeManager(log, config) {
 	this.name = config["name"] || "SMA Solar Inverter";
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
 	this.address = '169.254.12.3';
-	this.refreshInterval = (config['refreshInterval'] * 1000) || 1000;
+	const refreshInterval = (config['refreshInterval'] * 1000) || 1000;
 	this.debug = config["debug"] || false;
-
-	this.value = [];
-	this.value.Name = config["name"] || '';
-	this.value.FirmwareRevision = "1.0.0";
-	this.value.SerialNumber = "";
 
 	Characteristic.CustomAmperes = function() {
 		Characteristic.call(this, 'Amperes', 'E863F126-079E-48FF-8F27-9C2605A29F52');
@@ -89,11 +83,9 @@ function SMAHomeManager(log, config) {
 
 	// Start the connection and refresh cycles
 	this._connect();
-
-	// Set the automatic refresh onload only
 	setInterval(function() {
 		this._refresh();
-	}.bind(this), this.refreshInterval);
+	}.bind(this), refreshInterval);
 }
 
 SMAHomeManager.prototype = {
@@ -103,7 +95,7 @@ SMAHomeManager.prototype = {
 		callback();
 	},
 
-	_connect: function(isInitial) {
+	_connect: function() {
 		if(this.debug) {this.log("Attempting connection", this.address);}
 
 		// Connect to the ModBus server IP address
@@ -183,7 +175,6 @@ SMAHomeManager.prototype = {
 					}
 				}
 				else {
-					if(this.debug) {this.log("Device status", "Off - unreasonable value");}
 					this.inverter.getCharacteristic(Characteristic.On).updateValue(false);
 					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
 				}
@@ -217,11 +208,10 @@ SMAHomeManager.prototype = {
 
 		this.informationService = new Service.AccessoryInformation();
 		this.informationService
-			.setCharacteristic(Characteristic.Name, this.value.Name)
+			.setCharacteristic(Characteristic.Name, this.name)
 			// @see https://github.com/homebridge/HAP-NodeJS/issues/940#issuecomment-1111470278
 			.setCharacteristic(Characteristic.Manufacturer, 'SMA Solar Technology AG')
-			.setCharacteristic(Characteristic.Model, 'Sunny Boy')
-			.setCharacteristic(Characteristic.SerialNumber, this.value.SerialNumber);
+			.setCharacteristic(Characteristic.Model, 'Sunny Boy');
 
 		return [
 			this.inverter,
@@ -237,17 +227,6 @@ SMAHomeManager.prototype = {
 		characteristic.setProps({
 			perms: characteristic.props.perms.filter(function (p) { return readonlyPerms.includes(p); })
 		});
-  },
-
-	_getValue: function(CharacteristicName, callback) {
-		if(this.debug) {this.log("GET", CharacteristicName);}
-		callback(null);
-	},
-
-	_setValue: function(CharacteristicName, value, callback) {
-		// This does nothing if the user tries to turn it on / off as we cannot action anything on the device
-		if(this.debug) {this.log("SET", CharacteristicName);}
-		callback(null, true);
 	}
 
 };

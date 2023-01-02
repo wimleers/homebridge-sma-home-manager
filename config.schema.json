@@ -13,7 +13,7 @@
         "default": "SMA Inverter",
         "description": "The name of your device to show in the Home app",
         "minLength": 1,
-        "required": true
+        "required": false
       },
       "debug": {
         "title": "Debug logging",

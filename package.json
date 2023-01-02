@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "modbus-serial": "^7.7.3",
-    "moment": "^2.24.0",
     "utils": "^0.3.1"
   },
   "description": "SMA Home Manager & Inverter plug-in for Homebridge",
