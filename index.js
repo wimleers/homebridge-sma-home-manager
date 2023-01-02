@@ -165,14 +165,8 @@ SMAHomeManager.prototype = {
 					// Eve - Watts
 					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(solarWatts);
 
-					// Only when solar panels are currently producing do we need to update today's production.
+					// Only when solar panels are currently producing can we set A & V.
 					if (solarWatts > 0) {
-						client.readHoldingRegisters(30535, 10, function(err, data) {
-							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
-							}
-						}.bind(this));
-
 						// Eve - Amperes
 						client.readHoldingRegisters(30977, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
@@ -192,6 +186,13 @@ SMAHomeManager.prototype = {
 					if(this.debug) {this.log("Device status", "Off - unreasonable value");}
 					this.inverter.getCharacteristic(Characteristic.On).updateValue(false);
 					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
+				}
+			}.bind(this));
+
+			// Eve - kWh
+			client.readHoldingRegisters(30535, 10, function(err, data) {
+				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+					this.inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
 				}
 			}.bind(this));
 		}
