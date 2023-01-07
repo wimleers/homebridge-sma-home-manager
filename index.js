@@ -75,7 +75,7 @@ function SMAHomeManager(log, config) {
 			format: Characteristic.Formats.FLOAT,
 			unit: 'V',
 			minValue: 0,
-			maxValue: maxAmperes,
+			maxValue: maxVolts,
 			minStep: 0.1,
 			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
 		});
