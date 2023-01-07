@@ -28,7 +28,7 @@
     "sunny boy",
     "home manager"
   ],
-  "license": "MIT",
+  "license": "GPL-2.0-or-later",
   "main": "index.js",
   "name": "homebridge-sma-home-manager",
   "displayName": "Homebridge SMA Home Manager & Inverter",
