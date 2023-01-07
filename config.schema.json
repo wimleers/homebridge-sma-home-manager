@@ -1,6 +1,6 @@
 {
   "pluginAlias": "SMAHomeManager",
-  "pluginType": "accessory",
+  "pluginType": "platform",
   "singular": true,
   "headerDisplay": null,
   "schema": {

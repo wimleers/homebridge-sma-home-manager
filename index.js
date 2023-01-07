@@ -35,6 +35,9 @@ const inherits = require("util").inherits,
 	ModbusRTU = require("modbus-serial"),
 	dgram = require('dgram');
 
+const PLATFORM = 'SMAHomeManager';
+const PLUGIN_NAME = 'homebridge-sma-home-manager';
+
 var client = new ModbusRTU();
 
 var Service, Characteristic, Accessory;
@@ -43,15 +46,29 @@ module.exports = function(homebridge) {
 	Service = homebridge.hap.Service;
 	Characteristic = homebridge.hap.Characteristic;
 	Accessory = homebridge.hap.Accessory;
+	Uuid = homebridge.hap.uuid;
 
-	homebridge.registerAccessory("homebridge-sma-home-manager", "SMAHomeManager", SMAHomeManager);
+	homebridge.registerPlatform(PLUGIN_NAME, PLATFORM, SMAHomeManager);
 };
 
-function SMAHomeManager(log, config) {
+function SMAHomeManager(log, config, api) {
 	// General.
 	this.log = log;
 	this.name = config["name"] || "Solar Panels";
 	this.debug = config["debug"] || false;
+
+	// Platform state.
+	// @see APIEvent.DID_FINISH_LAUNCHING
+	// @see accessories()
+	this.launched = false;
+	// Discover both the inverter & energy manager prior to launching.
+	// @see accessories()
+	this.discovered = {};
+	// The 3 accessories: live, recent, today.
+	// @see accessories()
+	this.live = null;
+	this.recent = null;
+	this.today = null;
 
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
@@ -136,6 +153,29 @@ function SMAHomeManager(log, config) {
 	this._connect();
 	setInterval(function() {
 		this._refresh();
+
+		if (this.accessoriesCallback) {
+			// Only launch after we got metadata from both inverter & energy manager.
+			if (this.discovered.inverter && this.discovered.energyManager) {
+				// Prevent race condition: store the callback locally and overwrite it.
+				const callback = this.accessoriesCallback;
+				this.accessoriesCallback = false;
+
+				this.log.debug('Discovered', this.discovered);
+
+				// Launch!
+				callback([
+					this.live,
+					this.recent,
+					this.today,
+				])
+				this.launched = true;
+			}
+			else {
+				this.log.info('Discovered SMA inverter:', this.discovered.inverter ? this.discovered.inverter : 'no');
+				this.log.info('Discovered SMA energy manager:', this.discovered.energyManager ? this.discovered.energyManager : 'no');
+			}
+		}
 	}.bind(this), refreshInterval);
 
 	// Listen to SMA Home Manager Speedwire datagrams.
@@ -143,6 +183,70 @@ function SMAHomeManager(log, config) {
 }
 
 SMAHomeManager.prototype = {
+
+	// Adds 4 services to the given accessory: production, import, export, consumption.
+	_addServicesToAccessory(accessory, suffix) {
+		suffix = (suffix === undefined) ? '' : ' ' + suffix;
+
+		const inverter = new Service.Outlet('Solar Panels' + suffix, "production");
+		this._ensureAppropriateName(inverter);
+		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
+		this._makeReadonly(inverter.getCharacteristic(Characteristic.On));
+		inverter.addCharacteristic(Characteristic.StatusActive);
+		inverter.addCharacteristic(Characteristic.StatusFault);
+		inverter.addCharacteristic(Characteristic.CustomAmperes);
+		inverter.addCharacteristic(Characteristic.CustomKilowattHours);
+		inverter.addCharacteristic(Characteristic.CustomVolts);
+		inverter.addCharacteristic(Characteristic.CustomWatts);
+		inverter.setPrimaryService();
+		accessory.addService(inverter);
+
+		const netImport = new Service.Outlet("Import" + suffix, "import");
+		this._ensureAppropriateName(netImport);
+		this._makeReadonly(netImport.getCharacteristic(Characteristic.On));
+		netImport.addCharacteristic(Characteristic.CustomWatts);
+		accessory.addService(netImport);
+
+		const netExport = new Service.Outlet("Export" + suffix, "export");
+		this._ensureAppropriateName(netExport);
+		this._makeReadonly(netExport.getCharacteristic(Characteristic.On));
+		netExport.addCharacteristic(Characteristic.CustomWatts);
+		accessory.addService(netExport);
+
+		const consumption = new Service.Outlet("Consumption" + suffix, "consumption");
+		this._ensureAppropriateName(consumption);
+		this._makeReadonly(consumption.getCharacteristic(Characteristic.On));
+		// Electricity is always consumed, even if only to power the SMA Home Manager.
+		consumption.getCharacteristic(Characteristic.On).updateValue(true);
+		consumption.addCharacteristic(Characteristic.CustomWatts);
+		accessory.addService(consumption);
+
+		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
+		accessory.getServices = function() {
+			return accessory.services;
+		}.bind(this);
+	},
+
+	accessories(callback) {
+		this.live = new Accessory('Live', Uuid.generate(PLATFORM + 'live'))
+		// TRICKY: work around homebridge/homebridge#2815
+		this.live.name = this.live.displayName;
+		this._addServicesToAccessory(this.live);
+
+		this.recent = new Accessory('Recent', Uuid.generate(PLATFORM + 'recent'))
+		// TRICKY: work around homebridge/homebridge#2815
+		this.recent.name = this.recent.displayName;
+		this._addServicesToAccessory(this.recent, 'Recent');
+
+		this.today = new Accessory('Today', Uuid.generate(PLATFORM + 'today'))
+		// TRICKY: work around homebridge/homebridge#2815
+		this.today.name = this.today.displayName;
+		this._addServicesToAccessory(this.today, 'Today');
+
+		// Store the callback; we'll call it after discovery finishes.
+		// @see this.discovered
+		this.accessoriesCallback = callback;
+	},
 
 	identify: function(callback) {
 		this.log("identify");
@@ -171,6 +275,11 @@ SMAHomeManager.prototype = {
 	},
 
 	_refresh: function() {
+		if (!this.launched) {
+			this.discovered.inverter = true;
+			return;
+		}
+
 		// Obtain the values
 		try {
 			/*
@@ -178,26 +287,28 @@ SMAHomeManager.prototype = {
 			client.readHoldingRegisters(30057, 10, function(err, data) {this.value.SerialNumber = data.buffer.readUInt32BE();}.bind(this));
 			*/
 
+			const inverter = this.live.getServiceById(Service.Outlet, 'production');
+
 			// Inverter: StatusActive & StatusFault characteristics
 			client.readHoldingRegisters(30201, 10, function(err, data) {
 				const condition = data.buffer.readUInt32BE();
 				// 35 = Fault
 				if (condition === 35) {
-					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(false);
-					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
+					inverter.getCharacteristic(Characteristic.StatusActive).updateValue(false);
+					inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
 				}
 				// 455 = Warning
 				else if (condition === 455) {
-					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(True);
-					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
+					inverter.getCharacteristic(Characteristic.StatusActive).updateValue(True);
+					inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.GENERAL_FAULT);
 				}
 				// 303 = Off, 307 = Ok
 				else {
-					this.inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.NO_FAULT);
+					inverter.getCharacteristic(Characteristic.StatusFault).updateValue(Characteristic.StatusFault.NO_FAULT);
 					if (condition !== 303 && condition !== 307) {
 						this.log('Unknown inverter condition', condition);
 					}
-					this.inverter.getCharacteristic(Characteristic.StatusActive).updateValue(condition === 307);
+					inverter.getCharacteristic(Characteristic.StatusActive).updateValue(condition === 307);
 				}
 			}.bind(this));
 
@@ -206,38 +317,38 @@ SMAHomeManager.prototype = {
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
 					const solarWatts = data.buffer.readUInt32BE();
 					if(this.debug) {this.log('Current production:', solarWatts, 'Watt');}
-					this.inverter.getCharacteristic(Characteristic.On).updateValue(solarWatts > 0);
+					inverter.getCharacteristic(Characteristic.On).updateValue(solarWatts > 0);
 
 					// Eve - Watts
-					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(solarWatts);
+					inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(solarWatts);
 
 					// Only when solar panels are currently producing can we set A & V.
 					if (solarWatts > 0) {
 						// Eve - Amperes
 						client.readHoldingRegisters(30977, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
+								inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
 							}
 						}.bind(this));
 
 						// Eve - Volts
 						client.readHoldingRegisters(30783, 10, function(err, data) {
 							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*100) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								this.inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
+								inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
 							}
 						}.bind(this));
 					}
 				}
 				else {
-					this.inverter.getCharacteristic(Characteristic.On).updateValue(false);
-					this.inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
+					inverter.getCharacteristic(Characteristic.On).updateValue(false);
+					inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
 				}
 			}.bind(this));
 
 			// Eve - kWh
 			client.readHoldingRegisters(30535, 10, function(err, data) {
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-					this.inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
+					inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
 				}
 			}.bind(this));
 		}
@@ -274,15 +385,28 @@ SMAHomeManager.prototype = {
 			}
 			const [timestamp, netWatts, version] = this._parseDatagram(msg, rinfo);
 
+			if (!this.launched) {
+				return;
+			}
+
 			// Net export/import: real-time.
-			this.importRealtime.getCharacteristic(Characteristic.On).updateValue(netWatts > 0);
-			this.exportRealtime.getCharacteristic(Characteristic.On).updateValue(netWatts <= 0);
-			this.importRealtime.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts > 0 ? netWatts : 0);
-			this.exportRealtime.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts <= 0 ? -netWatts : 0);
+			const netImport = this.live.getServiceById(Service.Outlet, 'import');
+			const netExport = this.live.getServiceById(Service.Outlet, 'export');
+			netImport.getCharacteristic(Characteristic.On).updateValue(netWatts > 0);
+			netExport.getCharacteristic(Characteristic.On).updateValue(netWatts <= 0);
+			netImport.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts > 0 ? netWatts : 0);
+			netExport.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts <= 0 ? -netWatts : 0);
+
+			// Compute consumption based on netImport + production.
+			const production = this.live.getServiceById(Service.Outlet, 'production');
+			const producedWatts = production.getCharacteristic(Characteristic.CustomWatts).value;
+			const consumption = this.live.getServiceById(Service.Outlet, 'consumption');
+			consumption.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts + producedWatts);
 
 			// Net export/import: moving average.
+			// @todo refactor
 			this.sampleCount++;
-const previousMovingAverage = this.movingAverage;
+			const previousMovingAverage = this.movingAverage;
 			if (this.movingAverageSampleCount < this.movingAverageSampleSize) {
 				this.movingAverageSampleCount++;
 			}
@@ -296,10 +420,12 @@ const previousMovingAverage = this.movingAverage;
 				this.log.debug('5 min avg', this.sampleCount, timestamp, 'avg=', this.movingAverage, 'vs actual=', netWatts, ' -> delta: ', (this.movingAverage-netWatts), Math.round(new Date().valueOf() / 1000));
 			}
 			const avgNetWatts = this.movingAverage;
-			this.import.getCharacteristic(Characteristic.On).updateValue(avgNetWatts > 0);
-			this.export.getCharacteristic(Characteristic.On).updateValue(avgNetWatts <= 0);
-			this.import.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts > 0 ? avgNetWatts : 0);
-			this.export.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts <= 0 ? -avgNetWatts : 0);
+			const recentImport = this.recent.getServiceById(Service.Outlet, 'import');
+			const recentExport = this.recent.getServiceById(Service.Outlet, 'export');
+			recentImport.getCharacteristic(Characteristic.On).updateValue(avgNetWatts > 0);
+			recentExport.getCharacteristic(Characteristic.On).updateValue(avgNetWatts <= 0);
+			recentImport.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts > 0 ? avgNetWatts : 0);
+			recentExport.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts <= 0 ? -avgNetWatts : 0);
 		}.bind(this));
 
 		// Actually start listening.
@@ -404,6 +530,7 @@ const previousMovingAverage = this.movingAverage;
 
 	_parseDatagram: function(msg, info) {
 		// 6. Energy meter identifier ("Zählerkennung")
+		this.discovered.energyManager = true;
 		/*
 		this.value.Model = msg.slice(18, 20).readUInt16BE();
 		this.informationService.getCharacteristic(Characteristic.Model).updateValue(this.value.Model);
@@ -452,56 +579,6 @@ const previousMovingAverage = this.movingAverage;
 		*/
 
 		return [timestamp, netWatts, version];
-	},
-
-	getServices: function() {
-		this.inverter = new Service.Outlet(this.name);
-		this._ensureAppropriateName(this.inverter);
-		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
-		this._makeReadonly(this.inverter.getCharacteristic(Characteristic.On));
-		this.inverter.addCharacteristic(Characteristic.StatusActive);
-		this.inverter.addCharacteristic(Characteristic.StatusFault);
-		this.inverter.addCharacteristic(Characteristic.CustomAmperes);
-		this.inverter.addCharacteristic(Characteristic.CustomKilowattHours);
-		this.inverter.addCharacteristic(Characteristic.CustomVolts);
-		this.inverter.addCharacteristic(Characteristic.CustomWatts);
-		this.inverter.setPrimaryService();
-
-		this.import = new Service.Outlet("Import", "import");
-		this._ensureAppropriateName(this.import);
-		this._makeReadonly(this.import.getCharacteristic(Characteristic.On));
-		this.import.addCharacteristic(Characteristic.CustomWatts);
-
-		this.export = new Service.Outlet("Export", "export");
-		this._ensureAppropriateName(this.export);
-		this._makeReadonly(this.export.getCharacteristic(Characteristic.On));
-		this.export.addCharacteristic(Characteristic.CustomWatts);
-
-		this.importRealtime = new Service.Outlet("Import real-time", "import-realtime");
-		this._ensureAppropriateName(this.importRealtime);
-		this._makeReadonly(this.importRealtime.getCharacteristic(Characteristic.On));
-		this.importRealtime.addCharacteristic(Characteristic.CustomWatts);
-
-		this.exportRealtime = new Service.Outlet("Export real-time", "export-realtime");
-		this._ensureAppropriateName(this.exportRealtime);
-		this._makeReadonly(this.exportRealtime.getCharacteristic(Characteristic.On));
-		this.exportRealtime.addCharacteristic(Characteristic.CustomWatts);
-
-		this.informationService = new Service.AccessoryInformation();
-		this.informationService
-			.setCharacteristic(Characteristic.Name, this.name)
-			// @see https://github.com/homebridge/HAP-NodeJS/issues/940#issuecomment-1111470278
-			.setCharacteristic(Characteristic.Manufacturer, 'SMA Solar Technology AG')
-			.setCharacteristic(Characteristic.Model, 'Sunny Boy');
-
-		return [
-			this.inverter,
-			this.import,
-			this.export,
-			this.importRealtime,
-			this.exportRealtime,
-			this.informationService
-		];
 	},
 
 	// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
