@@ -73,7 +73,7 @@ function SMAHomeManager(log, config, api) {
 	this.recentMinutes = 3;
 	// The measurements necessary for "recent".
 	this.measurements = [];
-	this.measurementsNeeded = Math.max(this.recentMinutes, 15) * 60;
+	this.measurementsNeeded = this.recentMinutes * 60;
 	this.nextMeasurementIndex = 0;
 
 	// Inverter: SMA Sunny Boy.
@@ -461,51 +461,60 @@ SMAHomeManager.prototype = {
 				return;
 			}
 
-			// Capture the observations in a "measurement" object.
-			const importWatts = netWatts > 0 ? netWatts: 0;
-			const exportWatts = netWatts < 0 ? -netWatts: 0;
 			// Retrieve inverter production data stored by _refresh().
 			const producedWatts = this.live.getServiceById(Service.Outlet, 'production').getCharacteristic(Characteristic.CustomWatts).value;
-			const measurement = {
-				timestamp: timestamp,
-				import: importWatts,
-				export: exportWatts,
-				production: producedWatts,
-				consumption: importWatts + producedWatts,
-			};
-
-			// Store measurement and compute next measurement index.
-			var currentIndex = this.nextMeasurementIndex;
-			this.measurements[currentIndex] = measurement;
-			this.nextMeasurementIndex = (currentIndex + 1) % this.measurementsNeeded;
-
-			// Provide a sequential view of the measurements, to faciliate recency metrics.
-			// (The latest measurement is at the end.)
-			const sequentialMeasurements = currentIndex === this.measurements.length - 1
-				? this.measurements
-				: this.measurements
-					.slice(-this.measurements.length + currentIndex + 1)
-					.concat(this.measurements.slice(0, currentIndex + 1));
-
-			// Update each of the 4 services for both "live" and "recent".
-			['import', 'export', 'production', 'consumption'].forEach(type => {
-				// Live.
-				const watts = this.measurements[currentIndex][type];
-				const live = this.live.getServiceById(Service.Outlet, type);
-				live.getCharacteristic(Characteristic.On).updateValue(watts > 0);
-				live.getCharacteristic(Characteristic.CustomWatts).updateValue(watts);
-				// Recent.
-				const avgWatts = sequentialMeasurements.slice(-1 * this.recentMinutes * 60)
-					.map(measurement => measurement[type])
-					.reduce(this._reduceToAvg, 0);
-				const recent = this.recent.getServiceById(Service.Outlet, type);
-				recent.getCharacteristic(Characteristic.On).updateValue(avgWatts > 0);
-				recent.getCharacteristic(Characteristic.CustomWatts).updateValue(avgWatts);
-			})
+			this._processMeasurement(producedWatts, netWatts, timestamp);
 		}.bind(this));
 
 		// Actually start listening.
 		this.socket.bind(this.homeManagerPort);
+	},
+
+	// Processes a measurement:
+	// 1. Adds it to this.measurements
+	// 2. Updates HomeKit.
+	//
+	// (Should be called in regular intervals, 1 s assumed.)
+	_processMeasurement: function(producedWattsFromInverter, netWattsFromEnergyManager, timestampFromEnergyManager) {
+		// Capture the observations in a "measurement" object.
+		const importWatts = netWattsFromEnergyManager > 0 ? netWattsFromEnergyManager: 0;
+		const exportWatts = netWattsFromEnergyManager < 0 ? -netWattsFromEnergyManager: 0;
+		const measurement = {
+			timestamp: timestampFromEnergyManager,
+			import: importWatts,
+			export: exportWatts,
+			production: producedWattsFromInverter,
+			consumption: importWatts + producedWattsFromInverter,
+		};
+
+		// Store measurement and compute next measurement index.
+		var currentIndex = this.nextMeasurementIndex;
+		this.measurements[currentIndex] = measurement;
+		this.nextMeasurementIndex = (currentIndex + 1) % this.measurementsNeeded;
+
+		// Provide a sequential view of the measurements, to faciliate recency metrics.
+		// (The latest measurement is at the end.)
+		const sequentialMeasurements = currentIndex === this.measurements.length - 1
+			? this.measurements
+			: this.measurements
+				.slice(-this.measurements.length + currentIndex + 1)
+				.concat(this.measurements.slice(0, currentIndex + 1));
+
+		// Update each of the 4 services for both "live" and "recent".
+		['import', 'export', 'production', 'consumption'].forEach(type => {
+			// Live.
+			const watts = this.measurements[currentIndex][type];
+			const live = this.live.getServiceById(Service.Outlet, type);
+			live.getCharacteristic(Characteristic.On).updateValue(watts > 0);
+			live.getCharacteristic(Characteristic.CustomWatts).updateValue(watts);
+			// Recent.
+			const avgWatts = sequentialMeasurements.slice(-1 * this.recentMinutes * 60)
+				.map(measurement => measurement[type])
+				.reduce(this._reduceToAvg, 0);
+			const recent = this.recent.getServiceById(Service.Outlet, type);
+			recent.getCharacteristic(Characteristic.On).updateValue(avgWatts > 0);
+			recent.getCharacteristic(Characteristic.CustomWatts).updateValue(avgWatts);
+		})
 	},
 
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
