@@ -152,6 +152,7 @@ function SMAHomeManager(log, config, api) {
 	// Connect to SMA Sunny boy inverter via ModBus.
 	this._connect();
 	setInterval(function() {
+		this._readInverterMetadata();
 		this._refresh();
 
 		if (this.accessoriesCallback) {
@@ -162,6 +163,11 @@ function SMAHomeManager(log, config, api) {
 				this.accessoriesCallback = false;
 
 				this.log.debug('Discovered', this.discovered);
+
+				// Expose serial numbers & firmware revisions.
+				this._setAccessoryInformation(this.live);
+				this._setAccessoryInformation(this.recent);
+				this._setAccessoryInformation(this.today);
 
 				// Launch!
 				callback([
@@ -183,6 +189,17 @@ function SMAHomeManager(log, config, api) {
 }
 
 SMAHomeManager.prototype = {
+
+	_setAccessoryInformation(accessory) {
+		const serialNumbers = this.discovered.inverter.SerialNumber + ' & ' + this.discovered.energyManager.SerialNumber;
+		const firmwareRevisions = this.discovered.inverter.FirmwareRevision + ' & ' + this.discovered.energyManager.FirmwareRevision;
+		accessory.getService(Service.AccessoryInformation)
+			// @see https://github.com/homebridge/HAP-NodeJS/issues/940#issuecomment-1111470278
+			.setCharacteristic(Characteristic.Manufacturer, 'SMA Solar Technology AG')
+			.setCharacteristic(Characteristic.Model, 'Sunny Boy & SMA Home Manager 2.0')
+			.setCharacteristic(Characteristic.SerialNumber, serialNumbers)
+			.setCharacteristic(Characteristic.FirmwareRevision, firmwareRevisions);
+	},
 
 	// Adds 4 services to the given accessory: production, import, export, consumption.
 	_addServicesToAccessory(accessory, suffix) {
@@ -274,19 +291,74 @@ SMAHomeManager.prototype = {
 		catch(err) {this.log("Could not set the Channel Number");}
 	},
 
+	_readInverterMetadata: function () {
+			if (this.discovered.inverter) {
+				return;
+			}
+
+			let serialNumber;
+			let firmwareRevision;
+
+			// Read serial number.
+			client.readHoldingRegisters(30057, 10, function(err, data) {
+				serialNumber = data.buffer.readUInt32BE();
+				if (firmwareRevision) {
+					this.discovered.inverter = {
+						SerialNumber: serialNumber,
+						FirmwareRevision: firmwareRevision,
+					};
+				}
+			}.bind(this));
+
+			//  Read firmware version.
+			client.readHoldingRegisters(40063, 10, function(err, data) {
+				// Per section 3.5.9, "SMA Firmware Data Formats":
+				// - Byte 1: BCD-coded "major" version
+				const major = data.buffer.slice(0, 1).readUint8();
+				// - Byte 2: BCD-coded "minor" version
+				const minor = data.buffer.slice(1, 2).readUint8();
+				// - Byte 3: non-BCD-coded "build" version
+				// @todo The third number should be 55, but the 0x35 being received is 53. Unsure how to parse.
+				let build = data.buffer.slice(2, 3).readUint8();
+				// Byte 4 contains teh release type with 0–5 mapped to a string, and >5 without special interpretation.
+				let releaseType = data.buffer.slice(3, 4).readUint8();
+				switch (releaseType) {
+					case 0:
+						releaseType = 'N';
+						break;
+					case 1:
+						releaseType = 'E(xperimental)';
+						break;
+					case 2:
+						releaseType = 'A(lpha)';
+						break;
+					case 3:
+						releaseType = 'B(eta)';
+						break;
+					case 4:
+						releaseType = 'R';
+						break;
+					case 5:
+						releaseType = 'S(pecial release)';
+						break;
+				}
+				const firmwareRevision = major + '.' + minor + '.' + build + '.' + releaseType;
+				if (serialNumber) {
+					this.discovered.inverter = {
+						SerialNumber: serialNumber,
+						FirmwareRevision: firmwareRevision,
+					};
+				}
+			}.bind(this));
+	},
+
 	_refresh: function() {
 		if (!this.launched) {
-			this.discovered.inverter = true;
 			return;
 		}
 
 		// Obtain the values
 		try {
-			/*
-			// Serial Number
-			client.readHoldingRegisters(30057, 10, function(err, data) {this.value.SerialNumber = data.buffer.readUInt32BE();}.bind(this));
-			*/
-
 			const inverter = this.live.getServiceById(Service.Outlet, 'production');
 
 			// Inverter: StatusActive & StatusFault characteristics
@@ -383,7 +455,7 @@ SMAHomeManager.prototype = {
 			if (!this._isValidDatagram(msg)) {
 				return;
 			}
-			const [timestamp, netWatts, version] = this._parseDatagram(msg, rinfo);
+			const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
 
 			if (!this.launched) {
 				return;
@@ -530,21 +602,16 @@ SMAHomeManager.prototype = {
 
 	_parseDatagram: function(msg, info) {
 		// 6. Energy meter identifier ("Zählerkennung")
-		this.discovered.energyManager = true;
-		/*
-		this.value.Model = msg.slice(18, 20).readUInt16BE();
-		this.informationService.getCharacteristic(Characteristic.Model).updateValue(this.value.Model);
-		this.value.SerialNumber = Buffer.from(msg.slice(20, 24)).readUInt32BE();
-		this.log(this.value.SerialNumber);
-		this.informationService.setCharacteristic(Characteristic.SerialNumber, this.value.SerialNumber);
-		*/
+		const homeManagerDeviceMetadata = {
+			Model: msg.slice(18, 20).readUInt16BE(),
+			SerialNumber: Buffer.from(msg.slice(20, 24)).readUInt32BE()
+		};
 
 		// 7. Measuring time (in ms, with overflow) ("Ticker Messzeitpunkt in ms (überlaufend)")
 		const timestamp = msg.slice(24, 28).readUInt32BE() / 1000;
 
 		var data = msg.slice(28, -4);
 		var netWatts = null;
-		var version = null;
 		do {
 			// Read OBIS header.
 			const [measurementType, measuredValueIndex, byteCount] = this._getChannelTypeFromObisHeader(data.slice(0, 4));
@@ -563,9 +630,12 @@ SMAHomeManager.prototype = {
 					}
 				}
 			}
-			if (measurementType === 'version') {
-				version = data.slice(0, 1).readUint8() + '.' + data.slice(1, 2).readUint8() + '.' + data.slice(2, 3).readUint8() + '.' + data.slice(3, 4).toString();
-//				this.log(version);
+			if (measurementType === 'version' && !this.launched && !this.discovered.energyManager) {
+				const version = data.slice(0, 1).readUint8() + '.' + data.slice(1, 2).readUint8() + '.' + data.slice(2, 3).readUint8() + '.' + data.slice(3, 4).toString();
+				this.discovered.energyManager = {
+					...homeManagerDeviceMetadata,
+					FirmwareRevision: version,
+				};
 			}
 			// Proceed to next measuring point.
 			data = data.slice(byteCount);
@@ -578,7 +648,7 @@ SMAHomeManager.prototype = {
 		}
 		*/
 
-		return [timestamp, netWatts, version];
+		return [timestamp, netWatts];
 	},
 
 	// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
