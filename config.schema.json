@@ -19,11 +19,6 @@
         "title": "Debug logging",
         "type": "boolean",
         "description": "Turns on additional logging (can be helpful for diagnosing issues)"
-      },
-      "refreshInterval": {
-        "title": "Refresh interval (seconds)",
-        "type": "integer",
-        "default": 1
       }
     }
   },
@@ -43,8 +38,7 @@
       "title": "Advanced configuration",
       "expandable": true,
       "items": [
-        "debug",
-        "refreshInterval"
+        "debug"
       ]
     }
   ]

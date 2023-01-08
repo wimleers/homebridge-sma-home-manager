@@ -74,12 +74,12 @@ function SMAHomeManager(log, config, api) {
 	// The measurements necessary for "recent".
 	this.measurements = [];
 	this.measurementsNeeded = this.recentMinutes * 60;
+	this.currentMeasurementIndex = null;
 	this.nextMeasurementIndex = 0;
 
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
 	this.inverterAddress = '169.254.12.3';
-	const refreshInterval = (config['refreshInterval'] * 1000) || 1000;
 
 	// Energy manager: SMA Home Manager 2.0.
 	this.homeManagerAddress = '239.12.255.254';
@@ -154,11 +154,16 @@ function SMAHomeManager(log, config, api) {
 	// Connect to SMA Sunny boy inverter via ModBus.
 	this._connect();
 	setInterval(function() {
-		this._readInverterMetadata();
 		this._refresh();
+	}.bind(this), 60 * 1000);
 
+	// Listen to SMA Home Manager Speedwire datagrams.
+	this._startListener();
+
+	// Launch after both inverter & energy manager are discovered.
+	setInterval(function() {
+		this._readInverterMetadata();
 		if (this.accessoriesCallback) {
-			// Only launch after we got metadata from both inverter & energy manager.
 			if (this.discovered.inverter && this.discovered.energyManager) {
 				// Prevent race condition: store the callback locally and overwrite it.
 				const callback = this.accessoriesCallback;
@@ -184,10 +189,7 @@ function SMAHomeManager(log, config, api) {
 				this.log.info('Discovered SMA energy manager:', this.discovered.energyManager ? this.discovered.energyManager : 'no');
 			}
 		}
-	}.bind(this), refreshInterval);
-
-	// Listen to SMA Home Manager Speedwire datagrams.
-	this._startListener();
+	}.bind(this), 1000);
 }
 
 SMAHomeManager.prototype = {
@@ -384,38 +386,22 @@ SMAHomeManager.prototype = {
 				}
 			}.bind(this));
 
-			client.readHoldingRegisters(30775, 10, function(err, data) {
-				// Check if the value is unrealistic (the inverter is not generating)
-				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-					const solarWatts = data.buffer.readUInt32BE();
-					if(this.debug) {this.log('Current production:', solarWatts, 'Watt');}
-					inverter.getCharacteristic(Characteristic.On).updateValue(solarWatts > 0);
-
-					// Eve - Watts
-					inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(solarWatts);
-
-					// Only when solar panels are currently producing can we set A & V.
-					if (solarWatts > 0) {
-						// Eve - Amperes
-						client.readHoldingRegisters(30977, 10, function(err, data) {
-							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
-							}
-						}.bind(this));
-
-						// Eve - Volts
-						client.readHoldingRegisters(30783, 10, function(err, data) {
-							if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*100) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-								inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
-							}
-						}.bind(this));
+			// Only when solar panels are currently producing can we set A & V.
+			if (this.currentMeasurementIndex && this.measurements[this.currentMeasurementIndex].production > 0) {
+				// Eve - Amperes
+				client.readHoldingRegisters(30977, 10, function(err, data) {
+					if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+						inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
 					}
-				}
-				else {
-					inverter.getCharacteristic(Characteristic.On).updateValue(false);
-					inverter.getCharacteristic(Characteristic.CustomWatts).updateValue(0);
-				}
-			}.bind(this));
+				}.bind(this));
+
+				// Eve - Volts
+				client.readHoldingRegisters(30783, 10, function(err, data) {
+					if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*100) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+						inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
+					}
+				}.bind(this));
+			}
 
 			// Eve - kWh
 			client.readHoldingRegisters(30535, 10, function(err, data) {
@@ -463,10 +449,19 @@ SMAHomeManager.prototype = {
 				return;
 			}
 
-			const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
-			// Retrieve inverter production data stored by _refresh().
-			const producedWatts = this.live.getServiceById(Service.Outlet, 'production').getCharacteristic(Characteristic.CustomWatts).value;
-			this._processMeasurement(producedWatts, netWatts, timestamp);
+			// Read the live production from the inverter, to minimize the time offset
+			// relative to the received energy manager datagram.
+			const before = performance.now();
+			client.readHoldingRegisters(30775, 2).then((data) => {
+				const watts = data.buffer.readInt32BE();
+				// Negative numbers are returned when there is no production.
+				return watts >= 0 ? watts : 0;
+			})
+			.then((producedWatts) => {
+				const estimatedMsOffset = performance.now() - before;
+				const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
+				this._processMeasurement(producedWatts, netWatts, timestamp);
+			})
 		}.bind(this));
 
 		// Actually start listening.
@@ -493,6 +488,7 @@ SMAHomeManager.prototype = {
 		// Store measurement and compute next measurement index.
 		var currentIndex = this.nextMeasurementIndex;
 		this.measurements[currentIndex] = measurement;
+		this.currentMeasurementIndex = currentIndex;
 		this.nextMeasurementIndex = (currentIndex + 1) % this.measurementsNeeded;
 
 		// Provide a sequential view of the measurements, to faciliate recency metrics.
