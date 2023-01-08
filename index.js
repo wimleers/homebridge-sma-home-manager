@@ -455,12 +455,15 @@ SMAHomeManager.prototype = {
 			if (!this._isValidDatagram(msg)) {
 				return;
 			}
-			const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
 
+			// When not yet launched, enable the launch to happen by only parsing the
+			// datagram, this will populate this.discovered.energyManager.
 			if (!this.launched) {
+				this._parseDatagram(msg, rinfo);
 				return;
 			}
 
+			const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
 			// Retrieve inverter production data stored by _refresh().
 			const producedWatts = this.live.getServiceById(Service.Outlet, 'production').getCharacteristic(Characteristic.CustomWatts).value;
 			this._processMeasurement(producedWatts, netWatts, timestamp);
