@@ -80,6 +80,12 @@ function SMAHomeManager(log, config, api) {
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
 	this.inverterAddress = '169.254.12.3';
+	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579.
+	// Consequently, today's "net export" and "net import" need to be computed
+	// from total net export ("feed in counter", 30583) & total net import
+	// ("grid counter", 30581)…
+	// @todo persist this to survive restarts!
+	this.computedToday = { day: -1, missedSeconds: -1, start: { totalExport: -1, totalImport: -1 }, now: { totalExport: -1, totalImport: -1 } };
 
 	// Energy manager: SMA Home Manager 2.0.
 	this.homeManagerAddress = '239.12.255.254';
@@ -207,6 +213,9 @@ SMAHomeManager.prototype = {
 
 	// Adds 4 services to the given accessory: production, import, export, consumption.
 	_addServicesToAccessory(accessory, suffix) {
+		if (suffix !== undefined && suffix !== 'Recent' && suffix !== 'Today') {
+			throw new Error('Unknown suffix provided: ' + suffix);
+		}
 		suffix = (suffix === undefined) ? '' : ' ' + suffix;
 
 		const inverter = new Service.Outlet('Solar Panels' + suffix, "production");
@@ -215,29 +224,33 @@ SMAHomeManager.prototype = {
 		this._makeReadonly(inverter.getCharacteristic(Characteristic.On));
 		inverter.addCharacteristic(Characteristic.StatusActive);
 		inverter.addCharacteristic(Characteristic.StatusFault);
-		inverter.addCharacteristic(Characteristic.CustomAmperes);
+		if (suffix === '') {
+			inverter.addCharacteristic(Characteristic.CustomAmperes);
+			inverter.addCharacteristic(Characteristic.CustomVolts);
+		}
+		if (suffix !== 'Today') {
+			inverter.addCharacteristic(Characteristic.CustomWatts);
+		}
 		inverter.addCharacteristic(Characteristic.CustomKilowattHours);
-		inverter.addCharacteristic(Characteristic.CustomVolts);
-		inverter.addCharacteristic(Characteristic.CustomWatts);
 		inverter.setPrimaryService();
 		accessory.addService(inverter);
 
 		const netImport = new Service.Outlet("Import" + suffix, "import");
 		this._ensureAppropriateName(netImport);
 		this._makeReadonly(netImport.getCharacteristic(Characteristic.On));
-		netImport.addCharacteristic(Characteristic.CustomWatts);
+		netImport.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
 		accessory.addService(netImport);
 
 		const netExport = new Service.Outlet("Export" + suffix, "export");
 		this._ensureAppropriateName(netExport);
 		this._makeReadonly(netExport.getCharacteristic(Characteristic.On));
-		netExport.addCharacteristic(Characteristic.CustomWatts);
+		netExport.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
 		accessory.addService(netExport);
 
 		const consumption = new Service.Outlet("Consumption" + suffix, "consumption");
 		this._ensureAppropriateName(consumption);
 		this._makeReadonly(consumption.getCharacteristic(Characteristic.On));
-		consumption.addCharacteristic(Characteristic.CustomWatts);
+		consumption.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
 		accessory.addService(consumption);
 
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
@@ -361,6 +374,28 @@ SMAHomeManager.prototype = {
 
 		// Obtain the values
 		try {
+			// Ensure this.computedToday remains up-to-date.
+			const date = new Date();
+			client.readHoldingRegisters(30581, 4).then((data) => {
+				const currentTotals = {
+					totalImport: data.buffer.slice(0, 4).readUInt32BE() / 1000,
+					totalExport: data.buffer.slice(4, 8).readUInt32BE() / 1000,
+				};
+				if (this.computedToday.day != date.getDate()) {
+					this.computedToday = {
+						day: date.getDate(),
+						// Note that we *could* in theory fall back to parsing https://169.254.12.3/dyn/getDashlogger.json … or SMA could just provide a proper API 🙃
+						missedSeconds: (date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds(),
+						start: currentTotals,
+						now: currentTotals,
+					};
+					this.log.info('New day! Retrieved total import & export at', date, this.computedToday);
+				}
+				else {
+					this.computedToday.now = currentTotals;
+				}
+			});
+
 			const inverter = this.live.getServiceById(Service.Outlet, 'production');
 
 			// Inverter: StatusActive & StatusFault characteristics
@@ -405,9 +440,37 @@ SMAHomeManager.prototype = {
 
 			// Eve - kWh
 			client.readHoldingRegisters(30535, 10, function(err, data) {
+				let productionToday = 0;
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
-					inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(data.buffer.readUInt32BE() / 1000);
+					productionToday = data.buffer.readUInt32BE() / 1000;
 				}
+				// Update only the "Total Consumption" characteristic on the "live" accessory's "inverter" service.
+				inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(productionToday);
+
+				if (this.computedToday.day == -1) {
+					this.log.debug('Cannot update "Today" until necessary metadata is retrieved from inverter.')
+					return;
+				}
+
+				// Compute today's numbers up to now.
+				// @see _refresh()
+				const exportToday = this.computedToday.now.totalExport - this.computedToday.start.totalExport;
+				const importToday = this.computedToday.now.totalImport - this.computedToday.start.totalImport;
+				const todayTotals = {
+					import: importToday,
+					export: exportToday,
+					production: productionToday,
+					consumption: importToday + productionToday - exportToday,
+				};
+				console.log(this.computedToday, todayTotals);
+
+				// Update each of the 4 services for "today".
+				['import', 'export', 'production', 'consumption'].forEach(type => {
+					const kWh = todayTotals[type];
+					const today = this.today.getServiceById(Service.Outlet, type);
+					today.getCharacteristic(Characteristic.On).updateValue(kWh > 0);
+					today.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(kWh);
+				})
 			}.bind(this));
 		}
 		catch(err) {
