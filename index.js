@@ -503,6 +503,17 @@ SMAHomeManager.prototype = {
 				.slice(-this.measurements.length + currentIndex + 1)
 				.concat(this.measurements.slice(0, currentIndex + 1));
 
+		if (currentIndex === this.measurementsNeeded) {
+			this.log.debug(
+				'Periodic measurement assumptions check: average time between measurements should be 1 s, actually:',
+				sequentialMeasurements
+					.map(m => m.timestamp)
+					.reduceRight((result, val, index, array) => {
+						return (index == 0) ? result : result + val - array[index - 1];
+					}, 0) / (sequentialMeasurements.length - 1)
+			);
+		}
+
 		// Update each of the 4 services for both "live" and "recent".
 		['import', 'export', 'production', 'consumption'].forEach(type => {
 			// Live.
