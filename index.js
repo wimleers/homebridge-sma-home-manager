@@ -69,6 +69,12 @@ function SMAHomeManager(log, config, api) {
 	this.live = null;
 	this.recent = null;
 	this.today = null;
+	// How many minutes "recent" should track.
+	this.recentMinutes = 3;
+	// The measurements necessary for "recent".
+	this.measurements = [];
+	this.measurementsNeeded = Math.max(this.recentMinutes, 15) * 60;
+	this.nextMeasurementIndex = 0;
 
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
@@ -80,10 +86,6 @@ function SMAHomeManager(log, config, api) {
 	// @see https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=sma-spw
 	this.homeManagerPort = 9522;
 	this.multicastMembershipIntervalId = false;
-	this.movingAverage = 0;
-	this.movingAverageSampleCount = 0;
-	this.movingAverageSampleSize = 3 * 60; // 3 minutes worth of data
-	this.sampleCount = 0;
 	// 230 volts is expected, safety threshold is 250, 40 amps.
 	const maxVolts = 250;
 	const maxAmperes = 40;
@@ -233,8 +235,6 @@ SMAHomeManager.prototype = {
 		const consumption = new Service.Outlet("Consumption" + suffix, "consumption");
 		this._ensureAppropriateName(consumption);
 		this._makeReadonly(consumption.getCharacteristic(Characteristic.On));
-		// Electricity is always consumed, even if only to power the SMA Home Manager.
-		consumption.getCharacteristic(Characteristic.On).updateValue(true);
 		consumption.addCharacteristic(Characteristic.CustomWatts);
 		accessory.addService(consumption);
 
@@ -461,48 +461,54 @@ SMAHomeManager.prototype = {
 				return;
 			}
 
-			// Net export/import: real-time.
-			const netImport = this.live.getServiceById(Service.Outlet, 'import');
-			const netExport = this.live.getServiceById(Service.Outlet, 'export');
-			netImport.getCharacteristic(Characteristic.On).updateValue(netWatts > 0);
-			netExport.getCharacteristic(Characteristic.On).updateValue(netWatts <= 0);
-			netImport.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts > 0 ? netWatts : 0);
-			netExport.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts <= 0 ? -netWatts : 0);
+			// Capture the observations in a "measurement" object.
+			const importWatts = netWatts > 0 ? netWatts: 0;
+			const exportWatts = netWatts < 0 ? -netWatts: 0;
+			// Retrieve inverter production data stored by _refresh().
+			const producedWatts = this.live.getServiceById(Service.Outlet, 'production').getCharacteristic(Characteristic.CustomWatts).value;
+			const measurement = {
+				timestamp: timestamp,
+				import: importWatts,
+				export: exportWatts,
+				production: producedWatts,
+				consumption: importWatts + producedWatts,
+			};
 
-			// Compute consumption based on netImport + production.
-			const production = this.live.getServiceById(Service.Outlet, 'production');
-			const producedWatts = production.getCharacteristic(Characteristic.CustomWatts).value;
-			const consumption = this.live.getServiceById(Service.Outlet, 'consumption');
-			consumption.getCharacteristic(Characteristic.CustomWatts).updateValue(netWatts + producedWatts);
+			// Store measurement and compute next measurement index.
+			var currentIndex = this.nextMeasurementIndex;
+			this.measurements[currentIndex] = measurement;
+			this.nextMeasurementIndex = (currentIndex + 1) % this.measurementsNeeded;
 
-			// Net export/import: moving average.
-			// @todo refactor
-			this.sampleCount++;
-			const previousMovingAverage = this.movingAverage;
-			if (this.movingAverageSampleCount < this.movingAverageSampleSize) {
-				this.movingAverageSampleCount++;
-			}
-			if (this.movingAverageSampleCount === 1) {
-				this.movingAverage = netWatts;
-			}
-			else {
-				this.movingAverage += (netWatts - this.movingAverage) / this.movingAverageSampleCount;
-			}
-			if (this.debug) {
-				this.log.debug('5 min avg', this.sampleCount, timestamp, 'avg=', this.movingAverage, 'vs actual=', netWatts, ' -> delta: ', (this.movingAverage-netWatts), Math.round(new Date().valueOf() / 1000));
-			}
-			const avgNetWatts = this.movingAverage;
-			const recentImport = this.recent.getServiceById(Service.Outlet, 'import');
-			const recentExport = this.recent.getServiceById(Service.Outlet, 'export');
-			recentImport.getCharacteristic(Characteristic.On).updateValue(avgNetWatts > 0);
-			recentExport.getCharacteristic(Characteristic.On).updateValue(avgNetWatts <= 0);
-			recentImport.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts > 0 ? avgNetWatts : 0);
-			recentExport.getCharacteristic(Characteristic.CustomWatts).updateValue(avgNetWatts <= 0 ? -avgNetWatts : 0);
+			// Provide a sequential view of the measurements, to faciliate recency metrics.
+			// (The latest measurement is at the end.)
+			const sequentialMeasurements = currentIndex === this.measurements.length - 1
+				? this.measurements
+				: this.measurements
+					.slice(-this.measurements.length + currentIndex + 1)
+					.concat(this.measurements.slice(0, currentIndex + 1));
+
+			// Update each of the 4 services for both "live" and "recent".
+			['import', 'export', 'production', 'consumption'].forEach(type => {
+				// Live.
+				const watts = this.measurements[currentIndex][type];
+				const live = this.live.getServiceById(Service.Outlet, type);
+				live.getCharacteristic(Characteristic.On).updateValue(watts > 0);
+				live.getCharacteristic(Characteristic.CustomWatts).updateValue(watts);
+				// Recent.
+				const avgWatts = sequentialMeasurements.slice(-1 * this.recentMinutes * 60)
+					.map(measurement => measurement[type])
+					.reduce(this._reduceToAvg, 0);
+				const recent = this.recent.getServiceById(Service.Outlet, type);
+				recent.getCharacteristic(Characteristic.On).updateValue(avgWatts > 0);
+				recent.getCharacteristic(Characteristic.CustomWatts).updateValue(avgWatts);
+			})
 		}.bind(this));
 
 		// Actually start listening.
 		this.socket.bind(this.homeManagerPort);
 	},
+
+	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
 	// TRICKY: https://datatracker.ietf.org/doc/html/rfc3376#section-8.2
