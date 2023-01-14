@@ -484,7 +484,7 @@ SMAHomeManager.prototype = {
 			import: importWatts,
 			export: exportWatts,
 			production: producedWattsFromInverter,
-			consumption: importWatts + producedWattsFromInverter,
+			consumption: importWatts + producedWattsFromInverter - exportWatts,
 		};
 
 		// Store measurement and compute next measurement index.
