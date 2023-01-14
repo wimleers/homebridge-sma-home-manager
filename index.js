@@ -64,16 +64,17 @@ function SMAHomeManager(log, config, api) {
 	// Discover both the inverter & energy manager prior to launching.
 	// @see accessories()
 	this.discovered = {};
-	// The 3 accessories: live, recent, today.
+	// The 3 accessories: live, recent, today, signals.
 	// @see accessories()
 	this.live = null;
 	this.recent = null;
 	this.today = null;
+	this.signals = null;
 	// How many minutes "recent" should track.
 	this.recentMinutes = 3;
 	// The measurements necessary for "recent".
 	this.measurements = [];
-	this.measurementsNeeded = this.recentMinutes * 60;
+	this.measurementsNeeded = Math.max(this.recentMinutes, 15) * 60;
 	this.currentMeasurementIndex = null;
 	this.nextMeasurementIndex = 0;
 
@@ -96,6 +97,14 @@ function SMAHomeManager(log, config, api) {
 	const maxVolts = 250;
 	const maxAmperes = 40;
 	const maxRealPowerTransmissionCapability = maxVolts * maxAmperes;
+
+	// Functionality on top of both the inverter & energy manager.
+	this.signalsConfig = {
+		builtIn: config.signals,
+		surplus: config.surplusSignals,
+	};
+	// For small variations, like lights etc, which should be excluded from the PV surplus.
+	this.baseLoadVariability = 50;
 
 	Characteristic.CustomAmperes = function() {
 		Characteristic.call(this, 'Amperes', 'E863F126-079E-48FF-8F27-9C2605A29F52');
@@ -187,6 +196,7 @@ function SMAHomeManager(log, config, api) {
 					this.live,
 					this.recent,
 					this.today,
+					this.signals,
 				])
 				this.launched = true;
 			}
@@ -275,9 +285,45 @@ SMAHomeManager.prototype = {
 		this.today.name = this.today.displayName;
 		this._addServicesToAccessory(this.today, 'Today');
 
+		this.signals = new Accessory('Signals', Uuid.generate(PLATFORM + 'signals'))
+		// TRICKY: work around homebridge/homebridge#2815
+		this.signals.name = this.signals.displayName;
+		const signalNames = {
+			offGrid: "Off Grid",
+			noSun: "No Sun",
+			highImport: "High Import",
+		};
+		Object.keys(signalNames).forEach(id => {
+			if (!this.signalsConfig.builtIn[id]) {
+				return;
+			}
+			const label = signalNames[id];
+			let createdService = this._addSignalService(this.signals, label, id);
+			if (id === 'highImport') {
+				createdService.addCharacteristic(Characteristic.CustomWatts);
+			}
+		});
+		this.signalsConfig.surplus.forEach((signal) => {
+			console.log(signal.label);
+			const id = 'surplus-' + signal.label.replace(' ', '-');
+			this._addSignalService(this.signals, signal.label, id);
+		});
+		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
+		this.signals.getServices = function() {
+			return this.signals.services;
+		}.bind(this);
+
 		// Store the callback; we'll call it after discovery finishes.
 		// @see this.discovered
 		this.accessoriesCallback = callback;
+	},
+
+	_addSignalService(accessory, label, subtype) {
+		const signal = new Service.Switch(label, subtype);
+		this._ensureAppropriateName(signal);
+		this._makeReadonly(signal.getCharacteristic(Characteristic.On));
+		accessory.addService(signal);
+		return signal;
 	},
 
 	identify: function(callback) {
@@ -588,6 +634,34 @@ SMAHomeManager.prototype = {
 			recent.getCharacteristic(Characteristic.On).updateValue(avgWatts > 0);
 			recent.getCharacteristic(Characteristic.CustomWatts).updateValue(avgWatts);
 		})
+
+		// Update offGrid signal, if enabled.
+		const offGridSignal = this.signals.getServiceById(Service.Switch, 'offGrid');
+		if (offGridSignal) {
+			const offGridSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
+				.map(m => m.import)
+				.findLastIndex(w => w > 0);
+			offGridSignal.getCharacteristic(Characteristic.On).updateValue(offGridSeconds >= 60);
+		}
+		// Update noSun signal, if enabled.
+		const noSunSignal = this.signals.getServiceById(Service.Switch, 'noSun');
+		if (noSunSignal) {
+			const noSunSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
+				.map(m => m.production)
+				.findLastIndex(w => w > 0);
+			noSunSignal.getCharacteristic(Characteristic.On).updateValue(noSunSeconds >= 900);
+		}
+		// Update highImport signal, if enabled.
+		const highImportSignal = this.signals.getServiceById(Service.Switch, 'highImport');
+		if (highImportSignal) {
+			const avgImportWattsLast15Min = sequentialMeasurements.slice(-15 * 60)
+				.map(m => m.import)
+				.reduce(this._reduceToAvg, 0);
+			highImportSignal.getCharacteristic(Characteristic.CustomWatts).updateValue(avgImportWattsLast15Min);
+			highImportSignal.getCharacteristic(Characteristic.On).updateValue(avgImportWattsLast15Min > 2500);
+		}
+
+		// @todo surplus signals
 	},
 
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,

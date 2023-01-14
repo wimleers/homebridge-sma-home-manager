@@ -19,6 +19,53 @@
         "title": "Debug logging",
         "type": "boolean",
         "description": "Turns on additional logging (can be helpful for diagnosing issues)"
+      },
+      "signals": {
+        "title": "Energy Signals",
+        "type": "object",
+        "properties": {
+          "offGrid": {
+            "title": "Off Grid",
+            "type": "boolean",
+            "default": true,
+            "description": "When there has been 0 W imported from the grid for >=1 minutes (>=60 seconds)."
+          },
+          "noSun": {
+            "title": "No Sun",
+            "type": "boolean",
+            "default": true,
+            "description": "When there has been 0 W of production for >=15 minutes (>=900 seconds)."
+          },
+          "highImport": {
+            "title": "High Grid Import",
+            "type": "boolean",
+            "default": false,
+            "description": "When there has been on average >2500 W of imports for >=15 minutes. Your distribution network operator might charge you extra."
+          }
+        }
+      },
+      "surplusSignals": {
+        "title": "PV Surplus Signals",
+        "description": "Avoid exporting solar energy to the grid: consume it yourself, whenever the necessary surplus is available!",
+        "type": "array",
+        "items": {
+          "title": "PV Surplus Signal",
+          "type": "object",
+          "properties": {
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
+            "watts": {
+              "title": "Watts",
+              "type": "integer"
+            },
+            "minutes": {
+              "title": "Minutes",
+              "type": "integer"
+            }
+          }
+        }
       }
     }
   },
@@ -39,6 +86,50 @@
       "expandable": true,
       "items": [
         "debug"
+      ]
+    },
+    {
+      "type": "fieldset",
+      "title": "Energy Signals",
+      "expandable": true,
+      "expanded": true,
+      "items": [
+        "signals.offGrid",
+        "signals.noSun",
+        "signals.highImport",
+        {
+          "title": "PV Surplus",
+          "key": "surplusSignals",
+          "type": "array",
+          "items": [
+            {
+              "type": "div",
+              "displayFlex": true,
+              "flex-direction": "row",
+              "items": [
+                {
+                  "key": "surplusSignals[].label",
+                  "flex": "1 1 200px",
+                  "notitle": true,
+                  "placeholder": "Label"
+                },
+                {
+                  "key": "surplusSignals[].watts",
+                  "flex": "4 4 50px",
+                  "notitle": true,
+                  "placeholder": "Watts"
+                },
+                {
+                  "key": "surplusSignals[].minutes",
+                  "flex": "4 4 50px",
+                  "notitle": true,
+                  "placeholder": "Minutes"
+                }
+
+              ]
+            }
+          ]
+        }
       ]
     }
   ]
