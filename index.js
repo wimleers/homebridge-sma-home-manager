@@ -47,6 +47,7 @@ module.exports = function(homebridge) {
 	Characteristic = homebridge.hap.Characteristic;
 	Accessory = homebridge.hap.Accessory;
 	Uuid = homebridge.hap.uuid;
+	HomebridgeAPI = homebridge;
 
 	homebridge.registerPlatform(PLUGIN_NAME, PLATFORM, SMAHomeManager);
 };
@@ -77,6 +78,13 @@ function SMAHomeManager(log, config, api) {
 	this.measurementsNeeded = Math.max(this.recentMinutes, 15) * 60;
 	this.currentMeasurementIndex = null;
 	this.nextMeasurementIndex = 0;
+	// Some state needs to be persisted because it cannot be queried from the
+	// inverter nor the energy manager.
+	this.storage = require('node-persist');
+	this.storage.initSync({
+		dir: HomebridgeAPI.user.persistPath(),
+		forgiveParseErrors: true
+	});
 
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
@@ -84,9 +92,12 @@ function SMAHomeManager(log, config, api) {
 	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579.
 	// Consequently, today's "net export" and "net import" need to be computed
 	// from total net export ("feed in counter", 30583) & total net import
-	// ("grid counter", 30581)…
-	// @todo persist this to survive restarts!
-	this.computedToday = { day: -1, missedSeconds: -1, start: { totalExport: -1, totalImport: -1 }, now: { totalExport: -1, totalImport: -1 } };
+	// ("grid counter", 30581)… also persist this across restarts.
+	const cachedToday = this.storage.getItemSync(PLUGIN_NAME + 'computedToday');
+	this.computedToday = cachedToday !== undefined
+		? cachedToday
+		: { day: -1, missedSeconds: -1, start: { totalExport: -1, totalImport: -1 }, now: { totalExport: -1, totalImport: -1 } };
+	this.storage.setItemSync(PLUGIN_NAME + 'computedToday', this.computedToday);
 
 	// Energy manager: SMA Home Manager 2.0.
 	this.homeManagerAddress = '239.12.255.254';
@@ -436,6 +447,7 @@ SMAHomeManager.prototype = {
 						now: currentTotals,
 					};
 					this.log.info('New day! Retrieved total import & export at', date, this.computedToday);
+					this.storage.setItemSync(PLUGIN_NAME + 'computedToday', this.computedToday);
 				}
 				else {
 					this.computedToday.now = currentTotals;
