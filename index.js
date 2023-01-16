@@ -117,65 +117,85 @@ function SMAHomeManager(log, config, api) {
 	// For small variations, like lights etc, which should be excluded from the PV surplus.
 	this.baseLoadVariability = 50;
 
-	Characteristic.CustomAmperes = function() {
-		Characteristic.call(this, 'Amperes', 'E863F126-079E-48FF-8F27-9C2605A29F52');
-		this.setProps({
+	// Define non-standard characteristics.
+	const realPowerProps = {
+		format: Characteristic.Formats.FLOAT,
+		unit: 'W',
+		minValue: 0,
+		maxValue: maxRealPowerTransmissionCapability,
+		minStep: 0.1,
+		perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+	};
+	const energyProps = {
+		format: Characteristic.Formats.FLOAT,
+		unit: 'kWh',
+		minValue: 0,
+		maxValue: 65535,
+		minStep: 0.001,
+		perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+	};
+	const nonStandardCharacteristics = {
+		// Eve characteristics.
+		CustomWatts: { uuid: 'E863F10D-079E-48FF-8F27-9C2605A29F52', name: 'Consumption', props: realPowerProps },
+		CustomKilowattHours: { uuid: 'E863F10C-079E-48FF-8F27-9C2605A29F52', name: 'Total Consumption', props: energyProps },
+		CustomAmperes: { uuid: 'E863F126-079E-48FF-8F27-9C2605A29F52', name: 'Amperes', props: {
 			format: Characteristic.Formats.FLOAT,
 			unit: 'A',
 			minValue: 0,
 			maxValue: maxAmperes,
 			minStep: 0.01,
 			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
-		});
-		this.value = this.getDefaultValue();
-	};
-	inherits(Characteristic.CustomAmperes, Characteristic);
-	Characteristic.CustomAmperes.UUID = 'E863F126-079E-48FF-8F27-9C2605A29F52';
-
-	Characteristic.CustomKilowattHours = function() {
-		Characteristic.call(this, 'Total Consumption', 'E863F10C-079E-48FF-8F27-9C2605A29F52');
-		this.setProps({
-			format: Characteristic.Formats.FLOAT,
-			unit: 'kWh',
-			minValue: 0,
-			maxValue: 65535,
-			minStep: 0.001,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
-		});
-		this.value = this.getDefaultValue();
-	};
-	inherits(Characteristic.CustomKilowattHours, Characteristic);
-	Characteristic.CustomKilowattHours.UUID = 'E863F10C-079E-48FF-8F27-9C2605A29F52';
-
-	Characteristic.CustomVolts = function() {
-		Characteristic.call(this, 'Volts', 'E863F10A-079E-48FF-8F27-9C2605A29F52');
-		this.setProps({
+		}},
+		CustomVolts: { uuid: 'E863F10A-079E-48FF-8F27-9C2605A29F52', name: 'Volts', props: {
 			format: Characteristic.Formats.FLOAT,
 			unit: 'V',
 			minValue: 0,
 			maxValue: maxVolts,
 			minStep: 0.1,
 			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
-		});
-		this.value = this.getDefaultValue();
+		}},
+		// Our characteristics.
+		CustomProduction: { uuid: '00000001-0000-1000-8000-000019880120', name: 'Production', props: realPowerProps },
+		CustomImport: { uuid: '00000002-0000-1000-8000-000019880120', name: 'Import', props: { ...realPowerProps,  unit: 'W-' } },
+		CustomExport: { uuid: '00000003-0000-1000-8000-000019880120', name: 'Export', props: { ...realPowerProps, unit: 'W+' } },
+		CustomKilowattHoursProduction: { uuid: '00000011-0000-1000-8000-000019880120', name: 'Total Production', props: energyProps },
+		CustomKilowattHoursImport: { uuid: '00000012-0000-1000-8000-000019880120', name: 'Total Import', props: { ...energyProps, unit: 'kWh-' } },
+		CustomKilowattHoursExport: { uuid: '00000013-0000-1000-8000-000019880120', name: 'Total Export', props: { ...energyProps, unit: 'kWh+' } },
 	};
-	inherits(Characteristic.CustomVolts, Characteristic);
-	Characteristic.CustomVolts.UUID = 'E863F10A-079E-48FF-8F27-9C2605A29F52';
+	Object.keys(nonStandardCharacteristics).forEach(characteristic => {
+		const definition = nonStandardCharacteristics[characteristic];
+		Characteristic[characteristic] = function() {
+			Characteristic.call(this, definition.name, definition.uuid);
+			this.setProps(definition.props);
+			this.value = this.getDefaultValue();
+		};
+		inherits(Characteristic[characteristic], Characteristic);
+		Characteristic[characteristic].UUID = definition.uuid;
+	});
 
-	Characteristic.CustomWatts = function() {
-		Characteristic.call(this, 'Consumption', 'E863F10D-079E-48FF-8F27-9C2605A29F52');
-		this.setProps({
-			format: Characteristic.Formats.FLOAT,
-			unit: 'W',
-			minValue: 0,
-			maxValue: maxRealPowerTransmissionCapability,
-			minStep: 0.1,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
-		});
-		this.value = this.getDefaultValue();
+	// Define non-standard services.
+	Service.CustomPowerMonitor = function(displayName, subtype) {
+		displayName = (displayName === undefined) ? 'Power Monitor' : displayName;
+		Service.call(this, displayName, '10000000-0000-1000-8000-000019880120', subtype);
+		// Required characteristics.
+		this.addCharacteristic(Characteristic.CustomWatts);
+		this.addCharacteristic(Characteristic.CustomProduction);
+		this.addCharacteristic(Characteristic.CustomImport);
+		this.addCharacteristic(Characteristic.CustomExport);
 	};
-	inherits(Characteristic.CustomWatts, Characteristic);
-	Characteristic.CustomWatts.UUID = 'E863F10D-079E-48FF-8F27-9C2605A29F52';
+	inherits(Service.CustomPowerMonitor, Service);
+	Service.CustomPowerMonitor.UUID = '10000000-0000-1000-8000-000019880120';
+	Service.CustomEnergyMonitor = function(displayName, subtype) {
+		displayName = (displayName === undefined) ? 'Energy Monitor' : displayName;
+		Service.call(this, displayName, '20000000-0000-1000-8000-000019880120', subtype);
+		// Required characteristics.
+		this.addCharacteristic(Characteristic.CustomKilowattHours);
+		this.addCharacteristic(Characteristic.CustomKilowattHoursProduction);
+		this.addCharacteristic(Characteristic.CustomKilowattHoursImport);
+		this.addCharacteristic(Characteristic.CustomKilowattHoursExport);
+	};
+	inherits(Service.CustomEnergyMonitor, Service);
+	Service.CustomEnergyMonitor.UUID = '20000000-0000-1000-8000-000019880120';
 
 	// Connect to SMA Sunny boy inverter via ModBus.
 	this._connect();
@@ -232,69 +252,26 @@ SMAHomeManager.prototype = {
 			.setCharacteristic(Characteristic.FirmwareRevision, firmwareRevisions);
 	},
 
-	// Adds 4 services to the given accessory: production, import, export, consumption.
-	_addServicesToAccessory(accessory, suffix) {
-		if (suffix !== undefined && suffix !== 'Recent' && suffix !== 'Today') {
-			throw new Error('Unknown suffix provided: ' + suffix);
-		}
-		suffix = (suffix === undefined) ? '' : ' ' + suffix;
-
-		const inverter = new Service.Outlet('Solar Panels' + suffix, "production");
-		this._ensureAppropriateName(inverter);
-		// Inverter being on/off is something the inverter decides itself, so do not give the user the illusion they can change it.
-		this._makeReadonly(inverter.getCharacteristic(Characteristic.On));
-		inverter.addCharacteristic(Characteristic.StatusActive);
-		inverter.addCharacteristic(Characteristic.StatusFault);
-		if (suffix === '') {
-			inverter.addCharacteristic(Characteristic.CustomAmperes);
-			inverter.addCharacteristic(Characteristic.CustomVolts);
-		}
-		if (suffix !== 'Today') {
-			inverter.addCharacteristic(Characteristic.CustomWatts);
-		}
-		inverter.addCharacteristic(Characteristic.CustomKilowattHours);
-		inverter.setPrimaryService();
-		accessory.addService(inverter);
-
-		const netImport = new Service.Outlet("Import" + suffix, "import");
-		this._ensureAppropriateName(netImport);
-		this._makeReadonly(netImport.getCharacteristic(Characteristic.On));
-		netImport.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
-		accessory.addService(netImport);
-
-		const netExport = new Service.Outlet("Export" + suffix, "export");
-		this._ensureAppropriateName(netExport);
-		this._makeReadonly(netExport.getCharacteristic(Characteristic.On));
-		netExport.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
-		accessory.addService(netExport);
-
-		const consumption = new Service.Outlet("Consumption" + suffix, "consumption");
-		this._ensureAppropriateName(consumption);
-		this._makeReadonly(consumption.getCharacteristic(Characteristic.On));
-		consumption.addCharacteristic(suffix !== 'Today' ? Characteristic.CustomWatts : Characteristic.CustomKilowattHours);
-		accessory.addService(consumption);
-
-		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
-		accessory.getServices = function() {
-			return accessory.services;
-		}.bind(this);
-	},
-
 	accessories(callback) {
 		this.live = new Accessory('Live', Uuid.generate(PLATFORM + 'live'))
 		// TRICKY: work around homebridge/homebridge#2815
 		this.live.name = this.live.displayName;
-		this._addServicesToAccessory(this.live);
+		const liveService = new Service.CustomPowerMonitor();
+		liveService.addCharacteristic(Characteristic.CustomAmperes);
+		liveService.addCharacteristic(Characteristic.CustomVolts);
+		liveService.addCharacteristic(Characteristic.StatusActive);
+		liveService.addCharacteristic(Characteristic.StatusFault);
+		this.live.addService(liveService);
 
 		this.recent = new Accessory('Recent', Uuid.generate(PLATFORM + 'recent'))
 		// TRICKY: work around homebridge/homebridge#2815
 		this.recent.name = this.recent.displayName;
-		this._addServicesToAccessory(this.recent, 'Recent');
+		this.recent.addService(new Service.CustomPowerMonitor());
 
 		this.today = new Accessory('Today', Uuid.generate(PLATFORM + 'today'))
 		// TRICKY: work around homebridge/homebridge#2815
 		this.today.name = this.today.displayName;
-		this._addServicesToAccessory(this.today, 'Today');
+		this.today.addService(new Service.CustomEnergyMonitor());
 
 		this.signals = new Accessory('Signals', Uuid.generate(PLATFORM + 'signals'))
 		// TRICKY: work around homebridge/homebridge#2815
@@ -320,9 +297,11 @@ SMAHomeManager.prototype = {
 			this._addSignalService(this.signals, signal.label, id);
 		});
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
-		this.signals.getServices = function() {
-			return this.signals.services;
-		}.bind(this);
+		[this.live, this.recent, this.today, this.signals].forEach(accessory => {
+			accessory.getServices = function() {
+				return accessory.services;
+			}
+		})
 
 		// Store the callback; we'll call it after discovery finishes.
 		// @see this.discovered
@@ -454,7 +433,7 @@ SMAHomeManager.prototype = {
 				}
 			});
 
-			const inverter = this.live.getServiceById(Service.Outlet, 'production');
+			const inverter = this.live.getServiceById(Service.CustomPowerMonitor);
 
 			// Inverter: StatusActive & StatusFault characteristics
 			client.readHoldingRegisters(30201, 10, function(err, data) {
@@ -502,8 +481,6 @@ SMAHomeManager.prototype = {
 				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
 					productionToday = data.buffer.readUInt32BE() / 1000;
 				}
-				// Update only the "Total Consumption" characteristic on the "live" accessory's "inverter" service.
-				inverter.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(productionToday);
 
 				if (this.computedToday.day == -1) {
 					this.log.debug('Cannot update "Today" until necessary metadata is retrieved from inverter.')
@@ -514,21 +491,19 @@ SMAHomeManager.prototype = {
 				// @see _refresh()
 				const exportToday = this.computedToday.now.totalExport - this.computedToday.start.totalExport;
 				const importToday = this.computedToday.now.totalImport - this.computedToday.start.totalImport;
-				const todayTotals = {
+
+				// Update each of the 4 characteristics for "today".
+				const t = {
 					import: importToday,
 					export: exportToday,
 					production: productionToday,
 					consumption: importToday + productionToday - exportToday,
 				};
-				console.log(this.computedToday, todayTotals);
-
-				// Update each of the 4 services for "today".
-				['import', 'export', 'production', 'consumption'].forEach(type => {
-					const kWh = todayTotals[type];
-					const today = this.today.getServiceById(Service.Outlet, type);
-					today.getCharacteristic(Characteristic.On).updateValue(kWh > 0);
-					today.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(kWh);
-				})
+				const em = this.today.getServiceById(Service.CustomEnergyMonitor);
+				em.getCharacteristic(Characteristic.CustomKilowattHours).updateValue(t.consumption);
+				em.getCharacteristic(Characteristic.CustomKilowattHoursProduction).updateValue(t.production);
+				em.getCharacteristic(Characteristic.CustomKilowattHoursImport).updateValue(t.import);
+				em.getCharacteristic(Characteristic.CustomKilowattHoursExport).updateValue(t.export);
 			}.bind(this));
 		}
 		catch(err) {
@@ -631,21 +606,23 @@ SMAHomeManager.prototype = {
 			);
 		}
 
-		// Update each of the 4 services for both "live" and "recent".
+		// Update each of the 4 characteristics for both "live" and "recent".
+		const m = measurement;
+		const pmLive = this.live.getServiceById(Service.CustomPowerMonitor);
+		pmLive.getCharacteristic(Characteristic.CustomWatts).updateValue(m.consumption);
+		pmLive.getCharacteristic(Characteristic.CustomProduction).updateValue(m.production);
+		pmLive.getCharacteristic(Characteristic.CustomImport).updateValue(m.import);
+		pmLive.getCharacteristic(Characteristic.CustomExport).updateValue(m.export);
+		const recentMeasurements = sequentialMeasurements.slice(-1 * this.recentMinutes * 60);
+		let r = {};
 		['import', 'export', 'production', 'consumption'].forEach(type => {
-			// Live.
-			const watts = this.measurements[currentIndex][type];
-			const live = this.live.getServiceById(Service.Outlet, type);
-			live.getCharacteristic(Characteristic.On).updateValue(watts > 0);
-			live.getCharacteristic(Characteristic.CustomWatts).updateValue(watts);
-			// Recent.
-			const avgWatts = sequentialMeasurements.slice(-1 * this.recentMinutes * 60)
-				.map(measurement => measurement[type])
-				.reduce(this._reduceToAvg, 0);
-			const recent = this.recent.getServiceById(Service.Outlet, type);
-			recent.getCharacteristic(Characteristic.On).updateValue(avgWatts > 0);
-			recent.getCharacteristic(Characteristic.CustomWatts).updateValue(avgWatts);
-		})
+			r[type] = recentMeasurements.map(measurement => measurement[type]).reduce(this._reduceToAvg, 0);
+		});
+		const pmRecent = this.recent.getServiceById(Service.CustomPowerMonitor);
+		pmRecent.getCharacteristic(Characteristic.CustomWatts).updateValue(r.consumption);
+		pmRecent.getCharacteristic(Characteristic.CustomProduction).updateValue(r.production);
+		pmRecent.getCharacteristic(Characteristic.CustomImport).updateValue(r.import);
+		pmRecent.getCharacteristic(Characteristic.CustomExport).updateValue(r.export);
 
 		// Update offGrid signal, if enabled.
 		const offGridSignal = this.signals.getServiceById(Service.Switch, 'offGrid');
