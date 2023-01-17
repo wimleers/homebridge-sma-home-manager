@@ -161,6 +161,14 @@ function SMAHomeManager(log, config, api) {
 		CustomKilowattHoursProduction: { uuid: '00000011-0000-1000-8000-000019880120', name: 'Total Production', props: energyProps },
 		CustomKilowattHoursImport: { uuid: '00000012-0000-1000-8000-000019880120', name: 'Total Import', props: { ...energyProps, unit: 'kWh-' } },
 		CustomKilowattHoursExport: { uuid: '00000013-0000-1000-8000-000019880120', name: 'Total Export', props: { ...energyProps, unit: 'kWh+' } },
+		CustomSelfSufficiency: { uuid: '00000021-0000-1000-8000-000019880120', name: 'Self-Sufficiency', props: {
+			format: Characteristic.Formats.FLOAT,
+			unit: Characteristic.Units.PERCENTAGE,
+			minValue: -100,
+			maxValue: 1000,
+			minStep: 1,
+			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+		}},
 	};
 	Object.keys(nonStandardCharacteristics).forEach(characteristic => {
 		const definition = nonStandardCharacteristics[characteristic];
@@ -178,6 +186,7 @@ function SMAHomeManager(log, config, api) {
 		displayName = (displayName === undefined) ? 'Power Monitor' : displayName;
 		Service.call(this, displayName, '10000000-0000-1000-8000-000019880120', subtype);
 		// Required characteristics.
+		this.addCharacteristic(Characteristic.CustomSelfSufficiency);
 		this.addCharacteristic(Characteristic.CustomWatts);
 		this.addCharacteristic(Characteristic.CustomProduction);
 		this.addCharacteristic(Characteristic.CustomImport);
@@ -189,6 +198,7 @@ function SMAHomeManager(log, config, api) {
 		displayName = (displayName === undefined) ? 'Energy Monitor' : displayName;
 		Service.call(this, displayName, '20000000-0000-1000-8000-000019880120', subtype);
 		// Required characteristics.
+		this.addCharacteristic(Characteristic.CustomSelfSufficiency);
 		this.addCharacteristic(Characteristic.CustomKilowattHours);
 		this.addCharacteristic(Characteristic.CustomKilowattHoursProduction);
 		this.addCharacteristic(Characteristic.CustomKilowattHoursImport);
@@ -492,7 +502,7 @@ SMAHomeManager.prototype = {
 				const exportToday = this.computedToday.now.totalExport - this.computedToday.start.totalExport;
 				const importToday = this.computedToday.now.totalImport - this.computedToday.start.totalImport;
 
-				// Update each of the 4 characteristics for "today".
+				// Update each of the 5 characteristics for "today".
 				const t = {
 					import: importToday,
 					export: exportToday,
@@ -504,6 +514,7 @@ SMAHomeManager.prototype = {
 				em.getCharacteristic(Characteristic.CustomKilowattHoursProduction).updateValue(t.production);
 				em.getCharacteristic(Characteristic.CustomKilowattHoursImport).updateValue(t.import);
 				em.getCharacteristic(Characteristic.CustomKilowattHoursExport).updateValue(t.export);
+				em.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(t));
 			}.bind(this));
 		}
 		catch(err) {
@@ -606,13 +617,14 @@ SMAHomeManager.prototype = {
 			);
 		}
 
-		// Update each of the 4 characteristics for both "live" and "recent".
+		// Update each of the 5 characteristics for both "live" and "recent".
 		const m = measurement;
 		const pmLive = this.live.getServiceById(Service.CustomPowerMonitor);
 		pmLive.getCharacteristic(Characteristic.CustomWatts).updateValue(m.consumption);
 		pmLive.getCharacteristic(Characteristic.CustomProduction).updateValue(m.production);
 		pmLive.getCharacteristic(Characteristic.CustomImport).updateValue(m.import);
 		pmLive.getCharacteristic(Characteristic.CustomExport).updateValue(m.export);
+		pmLive.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(m));
 		const recentMeasurements = sequentialMeasurements.slice(-1 * this.recentMinutes * 60);
 		let r = {};
 		['import', 'export', 'production', 'consumption'].forEach(type => {
@@ -623,6 +635,7 @@ SMAHomeManager.prototype = {
 		pmRecent.getCharacteristic(Characteristic.CustomProduction).updateValue(r.production);
 		pmRecent.getCharacteristic(Characteristic.CustomImport).updateValue(r.import);
 		pmRecent.getCharacteristic(Characteristic.CustomExport).updateValue(r.export);
+		pmRecent.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(r));
 
 		// Update offGrid signal, if enabled.
 		const offGridSignal = this.signals.getServiceById(Service.Switch, 'offGrid');
@@ -654,6 +667,8 @@ SMAHomeManager.prototype = {
 	},
 
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
+
+	_computeSelfSufficiencyLevel: (m) => (m.production > 0 ? m.production : -1 * m.consumption) / m.consumption * 100,
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
 	// TRICKY: https://datatracker.ietf.org/doc/html/rfc3376#section-8.2
