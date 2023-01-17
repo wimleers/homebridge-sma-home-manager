@@ -15,11 +15,6 @@
         "minLength": 1,
         "required": false
       },
-      "debug": {
-        "title": "Debug logging",
-        "type": "boolean",
-        "description": "Turns on additional logging (can be helpful for diagnosing issues)"
-      },
       "signals": {
         "title": "Energy Signals",
         "type": "object",
@@ -85,7 +80,6 @@
       "title": "Advanced configuration",
       "expandable": true,
       "items": [
-        "debug"
       ]
     },
     {

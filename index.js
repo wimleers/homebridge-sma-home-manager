@@ -56,7 +56,6 @@ function SMAHomeManager(log, config, api) {
 	// General.
 	this.log = log;
 	this.name = config["name"] || "Solar Panels";
-	this.debug = config["debug"] || false;
 
 	// Platform state.
 	// @see APIEvent.DID_FINISH_LAUNCHING
@@ -332,14 +331,14 @@ SMAHomeManager.prototype = {
 	},
 
 	_connect: function() {
-		if(this.debug) {this.log("Attempting connection", this.inverterAddress);}
+		this.log.debug("Attempting connection with inverter", this.inverterAddress);
 
 		// Connect to the ModBus server IP address
 		try {
 			client.connectTCP(this.inverterAddress);
 		}
 		catch(err) {
-			this.log("Connection attempt failed");
+			this.log.debug("Connection attempt failed");
 			return;
 		}
 
@@ -347,7 +346,7 @@ SMAHomeManager.prototype = {
 			// Set the ModBus Id to use
 			client.setID(3);
 
-			if(this.debug) {this.log("Connection successful");}
+			this.log.debug("Connection successful");
 		}
 		catch(err) {this.log("Could not set the Channel Number");}
 	},
@@ -694,9 +693,7 @@ SMAHomeManager.prototype = {
 	// TRICKY: https://github.com/nodejs/node/issues/39377
 	// TRICKY: https://datatracker.ietf.org/doc/html/rfc3376#section-8.2
 	_keepMembershipActive: function() {
-		if (this.debug) {
-			this.log.debug('Dropping and re-adding multicast membership');
-		}
+		this.log.debug('Dropping and re-adding multicast membership');
 		this.socket.dropMembership(this.homeManagerAddress);
 		this.socket.addMembership(this.homeManagerAddress);
 	},
