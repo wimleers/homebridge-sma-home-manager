@@ -301,9 +301,9 @@ SMAHomeManager.prototype = {
 				createdService.addCharacteristic(Characteristic.CustomWatts);
 			}
 		});
-		this.signalsConfig.surplus.forEach((signal) => {
-			console.log(signal.label);
+		this.signalsConfig.surplus.forEach((signal, index) => {
 			const id = 'surplus-' + signal.label.replace(' ', '-');
+			this.signalsConfig.surplus[index].id = id;
 			this._addSignalService(this.signals, signal.label, id);
 		});
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
@@ -663,7 +663,28 @@ SMAHomeManager.prototype = {
 			highImportSignal.getCharacteristic(Characteristic.On).updateValue(avgImportWattsLast15Min > 2500);
 		}
 
-		// @todo surplus signals
+		let accumulatedSurplusWatts = 0;
+		const surplusMeasurements = sequentialMeasurements.map(m => m.export);
+		this.signalsConfig.surplus.forEach((signal, index) => {
+			const samplesForSignal = signal.minutes * 60;
+			const requiredWatts = signal.watts;
+			const sortedSamplingWindow = surplusMeasurements.slice(-samplesForSignal).sort();
+			const actualSamplesForSignal = sortedSamplingWindow.length;
+			// Don't toggle the surplus signal unless there's actually enough samples.
+			if (surplusMeasurements.length < samplesForSignal) {
+				return;
+			}
+			const min = sortedSamplingWindow.reduce((min, value) => Math.min(min, value), Infinity);
+			const p90 = sortedSamplingWindow[Math.round(0.9 * actualSamplesForSignal) - 1];
+			// For now, let's be strict: in the past `signal.minutes` the minimum
+			// surplus should exceed `signal.watts`, and 90% of the time it should
+			// also cover the base load variability. (To avoid frequent toggling.)
+			const hasSurplus = min > signal.watts && p90 > signal.watts + baseLoadVariability + accumulatedSurplusWatts;
+			this.signals.getServiceById(Service.Switch, signal.id).getCharacteristic(Characteristic.On).updateValue(hasSurplus);
+
+			// Take the accumulated required surplus watts into account for the subsequent signals.
+			accumulatedSurplusWatts += requiredWatts;
+		});
 	},
 
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
