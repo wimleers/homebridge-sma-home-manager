@@ -688,7 +688,19 @@ SMAHomeManager.prototype = {
 
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
 
-	_computeSelfSufficiencyLevel: (m) => (m.production > 0 ? m.production : -1 * m.consumption) / m.consumption * 100,
+	_computeSelfSufficiencyLevel: (m) => {
+		const numerator = m.production === 0
+			// -100%: no production implies no self-sufficiency at all.
+			? -1 * m.consumption
+			: (
+				m.import > 0
+					// 0–99%: production, import was needed, so 100% is impossible.
+					? m.production - m.export
+					// 0–1000%: production, no import.
+					: m.production
+			);
+		return numerator / m.consumption * 100;
+	},
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
 	// TRICKY: https://datatracker.ietf.org/doc/html/rfc3376#section-8.2
