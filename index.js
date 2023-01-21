@@ -166,7 +166,12 @@ function SMAHomeManager(log, config, api) {
 			minValue: -100,
 			maxValue: 1000,
 			minStep: 1,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
+			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
+		}},
+		CustomReason: { uuid: '00001000-0000-1000-8000-000019880120', name: 'Reason', props: {
+			format: Characteristic.Formats.STRING,
+			maxLen: 256,
+			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
 		}},
 	};
 	Object.keys(nonStandardCharacteristics).forEach(characteristic => {
@@ -297,7 +302,7 @@ SMAHomeManager.prototype = {
 			const label = signalNames[id];
 			let createdService = this._addSignalService(this.signals, label, id);
 			if (id === 'highImport') {
-				createdService.addCharacteristic(Characteristic.CustomWatts);
+				createdService.addCharacteristic(Characteristic.CustomImport);
 			}
 		});
 		this.signalsConfig.surplus.forEach((signal, index) => {
@@ -321,6 +326,7 @@ SMAHomeManager.prototype = {
 		const signal = new Service.Switch(label, subtype);
 		this._ensureAppropriateName(signal);
 		this._makeReadonly(signal.getCharacteristic(Characteristic.On));
+		signal.addCharacteristic(Characteristic.CustomReason);
 		accessory.addService(signal);
 		return signal;
 	},
@@ -643,6 +649,14 @@ SMAHomeManager.prototype = {
 				.map(m => m.import)
 				.findLastIndex(w => w > 0);
 			offGridSignal.getCharacteristic(Characteristic.On).updateValue(offGridSeconds >= 60);
+			let offGridReason = 'Import > 0 W in past minute.';
+			if (offGridSeconds > 0 && offGridSeconds < 60) {
+				offGridReason = 'Import = 0 W, but for less than 1 minute.';
+			}
+			else if (offGridSeconds >= 60) {
+				offGridReason = `Import = 0 W for >= ${parseInt(offGridSeconds / 60)} minutes.`;
+			}
+			offGridSignal.getCharacteristic(Characteristic.CustomReason).updateValue(offGridReason);
 		}
 		// Update noSun signal, if enabled.
 		const noSunSignal = this.signals.getServiceById(Service.Switch, 'noSun');
@@ -650,7 +664,22 @@ SMAHomeManager.prototype = {
 			const noSunSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.production)
 				.findLastIndex(w => w > 0);
+			const producedSomeWattsToday = this.today.getServiceById(Service.CustomEnergyMonitor)
+				.getCharacteristic(Characteristic.CustomKilowattHoursProduction).value > 0;
 			noSunSignal.getCharacteristic(Characteristic.On).updateValue(noSunSeconds >= 900);
+			// TRICKY: SMA decided to not populate ModBus registers 30199 ("waiting time
+			// until feed-in"). Consequently, it is impossible to know how long until PV
+			// production is expected to start (or end). It appears to be available via
+			// the SMAData2 protocol, but supporting that introduces lots of complexity.
+			// @todo Use the "suncalc" package to compute more sensible reasons before & after today's sunny period? If SMA exposed this information
+			noSunSignal.getCharacteristic(Characteristic.CustomReason).updateValue(noSunSeconds > 0
+				? (
+					producedSomeWattsToday
+					? `Production = 0 W for ${noSunSeconds >= 900 ? '>=' : '' + Math.round(noSunSeconds / 60) + ' <'} 15 minutes.`
+					: 'Awaiting first ray of sunlight…'
+				)
+				: 'Production > 0 W in past minute.'
+			);
 		}
 		// Update highImport signal, if enabled.
 		const highImportSignal = this.signals.getServiceById(Service.Switch, 'highImport');
@@ -658,8 +687,13 @@ SMAHomeManager.prototype = {
 			const avgImportWattsLast15Min = sequentialMeasurements.slice(-15 * 60)
 				.map(m => m.import)
 				.reduce(this._reduceToAvg, 0);
-			highImportSignal.getCharacteristic(Characteristic.CustomWatts).updateValue(avgImportWattsLast15Min);
+			// When far below the 2500 W treshold, round to the nearest 100 W, to avoid highly frequent updates.
+			highImportSignal.getCharacteristic(Characteristic.CustomImport).updateValue(avgImportWattsLast15Min < 2000
+				? Math.round(avgImportWattsLast15Min / 100) * 100
+				: avgImportWattsLast15Min
+			);
 			highImportSignal.getCharacteristic(Characteristic.On).updateValue(avgImportWattsLast15Min > 2500);
+			highImportSignal.getCharacteristic(Characteristic.CustomReason).updateValue(`Average import = ${ Math.round(avgImportWattsLast15Min/100) / 10 } kW ${avgImportWattsLast15Min > 2500 ? '>' : '<='} 2.5 kW in the last ${Math.round(sequentialMeasurements.length / 60)} minutes.`);
 		}
 
 		let accumulatedSurplusWatts = 0;
@@ -669,17 +703,27 @@ SMAHomeManager.prototype = {
 			const requiredWatts = signal.watts;
 			const sortedSamplingWindow = surplusMeasurements.slice(-samplesForSignal).sort();
 			const actualSamplesForSignal = sortedSamplingWindow.length;
+			const service = this.signals.getServiceById(Service.Switch, signal.id);
 			// Don't toggle the surplus signal unless there's actually enough samples.
 			if (surplusMeasurements.length < samplesForSignal) {
+				service.getCharacteristic(Characteristic.CustomReason).updateValue(`Less than ${signal.minutes} of data …`);
 				return;
 			}
 			const min = sortedSamplingWindow.reduce((min, value) => Math.min(min, value), Infinity);
 			const p90 = sortedSamplingWindow[Math.round(0.9 * actualSamplesForSignal) - 1];
-			// For now, let's be strict: in the past `signal.minutes` the minimum
-			// surplus should exceed `signal.watts`, and 90% of the time it should
-			// also cover the base load variability. (To avoid frequent toggling.)
-			const hasSurplus = min > signal.watts && p90 > signal.watts + baseLoadVariability + accumulatedSurplusWatts;
-			this.signals.getServiceById(Service.Switch, signal.id).getCharacteristic(Characteristic.On).updateValue(hasSurplus);
+			// In the past `signal.minutes` the minimum surplus should exceed
+			// `signal.watts`, and 90% of the time it should also cover the base load
+			// variability. (To avoid frequent toggling.)
+			const hasSurplus = min > signal.watts && p90 > signal.watts + this.baseLoadVariability + accumulatedSurplusWatts;
+			let reason = `Production surplus <= ${signal.watts} W for >= ${signal.minutes} minutes.`;
+			if (!hasSurplus && min > signal.watts) {
+				reason = `Production surplus > ${signal.watts} W for >= ${signal.minutes} minutes, but did not cover base load variability.`;
+			}
+			else if (hasSurplus) {
+				reason = `Production surplus > ${signal.watts} W and also covers base load variability for >= ${signal.minutes} minutes.`;
+			}
+			service.getCharacteristic(Characteristic.On).updateValue(hasSurplus);
+			service.getCharacteristic(Characteristic.CustomReason).updateValue(reason);
 
 			// Take the accumulated required surplus watts into account for the subsequent signals.
 			accumulatedSurplusWatts += requiredWatts;
