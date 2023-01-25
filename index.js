@@ -733,17 +733,16 @@ SMAHomeManager.prototype = {
 	_reduceToAvg: (avg, v, _, { length }) => avg + v / length,
 
 	_computeSelfSufficiencyLevel: (m) => {
-		const numerator = m.production === 0
-			// -100%: no production implies no self-sufficiency at all.
-			? -1 * m.consumption
-			: (
-				m.import > 0
-					// 0–99%: production, import was needed, so 100% is impossible.
-					? m.production - m.export
-					// 0–1000%: production, no import.
-					: m.production
-			);
-		return numerator / m.consumption * 100;
+		// -100%: no production implies no self-sufficiency at all.
+		if (m.production === 0) {
+			return -100;
+		}
+		// 0–99%: production, import was needed, so 100% is impossible.
+		if (m.import > 0) {
+			return Math.min((m.production - m.export) / m.consumption * 100, 99);
+		}
+		// 0–10000%: production, no import.
+		return m.production / m.consumption * 100;
 	},
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
