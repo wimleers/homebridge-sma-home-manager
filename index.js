@@ -210,6 +210,20 @@ function SMAHomeManager(log, config, api) {
 	};
 	inherits(Service.CustomEnergyMonitor, Service);
 	Service.CustomEnergyMonitor.UUID = '20000000-0000-1000-8000-000019880120';
+	Service.CustomEnergySignal = function(displayName, subtype) {
+		displayName = (displayName === undefined) ? 'Energy Signal' : displayName;
+		Service.call(this, displayName, '30000000-0000-1000-8000-000019880120', subtype);
+		// Required characteristics.
+		this.addCharacteristic(Characteristic.On);
+		this.getCharacteristic(Characteristic.On).setProps({perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]});
+		this.addCharacteristic(Characteristic.CustomReason);
+		// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
+		// @see https://github.com/homebridge/homebridge/issues/3281#issuecomment-1338868527
+		this.addOptionalCharacteristic(Characteristic.ConfiguredName);
+		this.setCharacteristic(Characteristic.ConfiguredName, displayName);
+	};
+	inherits(Service.CustomEnergySignal, Service);
+	Service.CustomEnergySignal.UUID = '30000000-0000-1000-8000-000019880120';
 
 	// Connect to SMA Sunny boy inverter via ModBus.
 	this._connect();
@@ -300,15 +314,16 @@ SMAHomeManager.prototype = {
 				return;
 			}
 			const label = signalNames[id];
-			let createdService = this._addSignalService(this.signals, label, id);
+			let createdService = new Service.CustomEnergySignal(label, id);
 			if (id === 'highImport') {
 				createdService.addCharacteristic(Characteristic.CustomImport);
 			}
+			this.signals.addService(createdService);
 		});
 		this.signalsConfig.surplus.forEach((signal, index) => {
 			const id = 'surplus-' + signal.label.replace(' ', '-');
 			this.signalsConfig.surplus[index].id = id;
-			this._addSignalService(this.signals, signal.label, id);
+			this.signals.addService(new Service.CustomEnergySignal(signal.label, id));
 		});
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
 		[this.live, this.recent, this.today, this.signals].forEach(accessory => {
@@ -320,15 +335,6 @@ SMAHomeManager.prototype = {
 		// Store the callback; we'll call it after discovery finishes.
 		// @see this.discovered
 		this.accessoriesCallback = callback;
-	},
-
-	_addSignalService(accessory, label, subtype) {
-		const signal = new Service.Switch(label, subtype);
-		this._ensureAppropriateName(signal);
-		this._makeReadonly(signal.getCharacteristic(Characteristic.On));
-		signal.addCharacteristic(Characteristic.CustomReason);
-		accessory.addService(signal);
-		return signal;
 	},
 
 	identify: function(callback) {
@@ -643,7 +649,7 @@ SMAHomeManager.prototype = {
 		pmRecent.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(r));
 
 		// Update offGrid signal, if enabled.
-		const offGridSignal = this.signals.getServiceById(Service.Switch, 'offGrid');
+		const offGridSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'offGrid');
 		if (offGridSignal) {
 			const offGridSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.import)
@@ -659,7 +665,7 @@ SMAHomeManager.prototype = {
 			offGridSignal.getCharacteristic(Characteristic.CustomReason).updateValue(offGridReason);
 		}
 		// Update noSun signal, if enabled.
-		const noSunSignal = this.signals.getServiceById(Service.Switch, 'noSun');
+		const noSunSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'noSun');
 		if (noSunSignal) {
 			const noSunSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.production)
@@ -682,7 +688,7 @@ SMAHomeManager.prototype = {
 			);
 		}
 		// Update highImport signal, if enabled.
-		const highImportSignal = this.signals.getServiceById(Service.Switch, 'highImport');
+		const highImportSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'highImport');
 		if (highImportSignal) {
 			const avgImportWattsLast15Min = sequentialMeasurements.slice(-15 * 60)
 				.map(m => m.import)
@@ -703,7 +709,7 @@ SMAHomeManager.prototype = {
 			const requiredWatts = signal.watts;
 			const sortedSamplingWindow = surplusMeasurements.slice(-samplesForSignal).sort();
 			const actualSamplesForSignal = sortedSamplingWindow.length;
-			const service = this.signals.getServiceById(Service.Switch, signal.id);
+			const service = this.signals.getServiceById(Service.CustomEnergySignal, signal.id);
 			// Don't toggle the surplus signal unless there's actually enough samples.
 			if (surplusMeasurements.length < samplesForSignal) {
 				service.getCharacteristic(Characteristic.CustomReason).updateValue(`Less than ${signal.minutes} of data …`);
@@ -888,14 +894,6 @@ SMAHomeManager.prototype = {
 		*/
 
 		return [timestamp, netWatts];
-	},
-
-	// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
-	// @see https://github.com/homebridge/homebridge/issues/3281#issuecomment-1338868527
-	_ensureAppropriateName(service) {
-		service.addCharacteristic(Characteristic.ConfiguredName);
-		service.setCharacteristic(Characteristic.ConfiguredName, service.displayName);
-		this._makeReadonly(service.getCharacteristic(Characteristic.ConfiguredName));
 	},
 
 	_makeReadonly(characteristic) {
