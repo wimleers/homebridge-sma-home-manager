@@ -277,7 +277,7 @@ SMAHomeManager.prototype = {
 	},
 
 	accessories(callback) {
-		this.live = new Accessory('Live', Uuid.generate(PLATFORM + 'live'))
+		this.live = new Accessory('Live power flow', Uuid.generate(PLATFORM + 'live'))
 		const liveService = new Service.CustomPowerMonitor();
 		liveService.addCharacteristic(Characteristic.CustomAmperes);
 		liveService.addCharacteristic(Characteristic.CustomVolts);
@@ -285,16 +285,16 @@ SMAHomeManager.prototype = {
 		liveService.addCharacteristic(Characteristic.StatusFault);
 		this.live.addService(liveService);
 
-		this.recent = new Accessory('Recent', Uuid.generate(PLATFORM + 'recent'))
+		this.recent = new Accessory('Recent power flow', Uuid.generate(PLATFORM + 'recent'))
 		this.recent.addService(new Service.CustomPowerMonitor());
 
-		this.today = new Accessory('Today', Uuid.generate(PLATFORM + 'today'))
+		this.today = new Accessory("Today's energy flow", Uuid.generate(PLATFORM + 'today'))
 		this.today.addService(new Service.CustomEnergyMonitor());
 
 		const signalNames = {
-			offGrid: "Off Grid",
-			noSun: "No Sun",
-			highImport: "High Import",
+			offGrid: "Off Grid energy signal",
+			noSun: "No Sun energy signal",
+			highImport: "High Import energy signal",
 		};
 		Object.keys(signalNames).forEach(id => {
 			if (!this.signalsConfig.builtIn[id]) {
@@ -311,7 +311,7 @@ SMAHomeManager.prototype = {
 		this.signalsConfig.surplus.forEach((signal, index) => {
 			const id = 'surplus-' + signal.label.replace(' ', '-');
 			this.signalsConfig.surplus[index].id = id;
-			this.signals[id] = new Accessory(signal.label, Uuid.generate(PLATFORM + 'signals' + id));
+			this.signals[id] = new Accessory(signal.label + ' energy signal', Uuid.generate(PLATFORM + 'signals' + id));
 			this.signals[id].addService(new Service.CustomEnergySignal());
 		});
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
