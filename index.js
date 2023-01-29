@@ -64,12 +64,12 @@ function SMAHomeManager(log, config, api) {
 	// Discover both the inverter & energy manager prior to launching.
 	// @see accessories()
 	this.discovered = {};
-	// The 3 accessories: live, recent, today, signals.
+	// The 3+ accessories: live, recent, today, signals (>=0).
 	// @see accessories()
 	this.live = null;
 	this.recent = null;
 	this.today = null;
-	this.signals = null;
+	this.signals = {};
 	// How many minutes "recent" should track.
 	this.recentMinutes = 3;
 	// The measurements necessary for "recent".
@@ -217,10 +217,6 @@ function SMAHomeManager(log, config, api) {
 		this.addCharacteristic(Characteristic.On);
 		this.getCharacteristic(Characteristic.On).setProps({perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]});
 		this.addCharacteristic(Characteristic.CustomReason);
-		// Since iOS 16, `Name` must match `ConfiguredName`, otherwise iOS will automatically configure `ConfiguredName` based on the accessory name.
-		// @see https://github.com/homebridge/homebridge/issues/3281#issuecomment-1338868527
-		this.addOptionalCharacteristic(Characteristic.ConfiguredName);
-		this.setCharacteristic(Characteristic.ConfiguredName, displayName);
 	};
 	inherits(Service.CustomEnergySignal, Service);
 	Service.CustomEnergySignal.UUID = '30000000-0000-1000-8000-000019880120';
@@ -255,7 +251,7 @@ function SMAHomeManager(log, config, api) {
 					this.live,
 					this.recent,
 					this.today,
-					this.signals,
+					...Object.values(this.signals),
 				])
 				this.launched = true;
 			}
@@ -282,8 +278,6 @@ SMAHomeManager.prototype = {
 
 	accessories(callback) {
 		this.live = new Accessory('Live', Uuid.generate(PLATFORM + 'live'))
-		// TRICKY: work around homebridge/homebridge#2815
-		this.live.name = this.live.displayName;
 		const liveService = new Service.CustomPowerMonitor();
 		liveService.addCharacteristic(Characteristic.CustomAmperes);
 		liveService.addCharacteristic(Characteristic.CustomVolts);
@@ -292,18 +286,11 @@ SMAHomeManager.prototype = {
 		this.live.addService(liveService);
 
 		this.recent = new Accessory('Recent', Uuid.generate(PLATFORM + 'recent'))
-		// TRICKY: work around homebridge/homebridge#2815
-		this.recent.name = this.recent.displayName;
 		this.recent.addService(new Service.CustomPowerMonitor());
 
 		this.today = new Accessory('Today', Uuid.generate(PLATFORM + 'today'))
-		// TRICKY: work around homebridge/homebridge#2815
-		this.today.name = this.today.displayName;
 		this.today.addService(new Service.CustomEnergyMonitor());
 
-		this.signals = new Accessory('Signals', Uuid.generate(PLATFORM + 'signals'))
-		// TRICKY: work around homebridge/homebridge#2815
-		this.signals.name = this.signals.displayName;
 		const signalNames = {
 			offGrid: "Off Grid",
 			noSun: "No Sun",
@@ -314,22 +301,26 @@ SMAHomeManager.prototype = {
 				return;
 			}
 			const label = signalNames[id];
-			let createdService = new Service.CustomEnergySignal(label, id);
+			this.signals[id] = new Accessory(label, Uuid.generate(PLATFORM + 'signals' + id));
+			let createdService = new Service.CustomEnergySignal();
 			if (id === 'highImport') {
 				createdService.addCharacteristic(Characteristic.CustomImport);
 			}
-			this.signals.addService(createdService);
+			this.signals[id].addService(createdService);
 		});
 		this.signalsConfig.surplus.forEach((signal, index) => {
 			const id = 'surplus-' + signal.label.replace(' ', '-');
 			this.signalsConfig.surplus[index].id = id;
-			this.signals.addService(new Service.CustomEnergySignal(signal.label, id));
+			this.signals[id] = new Accessory(signal.label, Uuid.generate(PLATFORM + 'signals' + id));
+			this.signals[id].addService(new Service.CustomEnergySignal());
 		});
 		// TRICKY: for static platforms, this is apparently not provided by Homebridge 🤷‍♂️
-		[this.live, this.recent, this.today, this.signals].forEach(accessory => {
+		[this.live, this.recent, this.today, ...Object.values(this.signals)].forEach(accessory => {
 			accessory.getServices = function() {
 				return accessory.services;
 			}
+			// TRICKY: work around homebridge/homebridge#2815
+			accessory.name = accessory.displayName;
 		})
 
 		// Store the callback; we'll call it after discovery finishes.
@@ -649,7 +640,7 @@ SMAHomeManager.prototype = {
 		pmRecent.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(r));
 
 		// Update offGrid signal, if enabled.
-		const offGridSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'offGrid');
+		const offGridSignal = this.signals.offGrid.getServiceById(Service.CustomEnergySignal);
 		if (offGridSignal) {
 			const offGridSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.import)
@@ -665,7 +656,7 @@ SMAHomeManager.prototype = {
 			offGridSignal.getCharacteristic(Characteristic.CustomReason).updateValue(offGridReason);
 		}
 		// Update noSun signal, if enabled.
-		const noSunSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'noSun');
+		const noSunSignal = this.signals.noSun.getServiceById(Service.CustomEnergySignal);
 		if (noSunSignal) {
 			const noSunSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.production)
@@ -688,7 +679,7 @@ SMAHomeManager.prototype = {
 			);
 		}
 		// Update highImport signal, if enabled.
-		const highImportSignal = this.signals.getServiceById(Service.CustomEnergySignal, 'highImport');
+		const highImportSignal = this.signals.highImport.getServiceById(Service.CustomEnergySignal);
 		if (highImportSignal) {
 			const avgImportWattsLast15Min = sequentialMeasurements.slice(-15 * 60)
 				.map(m => m.import)
@@ -709,7 +700,7 @@ SMAHomeManager.prototype = {
 			const requiredWatts = signal.watts;
 			const sortedSamplingWindow = surplusMeasurements.slice(-samplesForSignal).sort();
 			const actualSamplesForSignal = sortedSamplingWindow.length;
-			const service = this.signals.getServiceById(Service.CustomEnergySignal, signal.id);
+			const service = this.signals[signal.id].getServiceById(Service.CustomEnergySignal);
 			// Don't toggle the surplus signal unless there's actually enough samples.
 			if (surplusMeasurements.length < samplesForSignal) {
 				service.getCharacteristic(Characteristic.CustomReason).updateValue(`Less than ${signal.minutes} of data …`);
