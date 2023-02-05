@@ -39,6 +39,12 @@ const PLATFORM = 'SMAHomeManager';
 const PACKAGE = require('./package.json');
 const PLUGIN_NAME = PACKAGE.name;
 
+// See SMA-Modbus-general-TI-en-10.pdf.
+const SMA_MODBUS_CLIENT_ID = 3;
+// In that same PDF, see "3.5.7 SMA Data Types and NaN Values".
+const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
+const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
+
 var client = new ModbusRTU();
 
 var Service, Characteristic, Accessory;
@@ -335,8 +341,7 @@ SMAHomeManager.prototype = {
 		this.log.debug("Connecting to inverter.");
 		try {
 			client.connectTCP(this.inverterAddress);
-			// See SMA-Modbus-general-TI-en-10.pdf.
-			client.setID(3);
+			client.setID(SMA_MODBUS_CLIENT_ID);
 			this.log.debug("Successfully connected to inverter.");
 		}
 		catch(err) {
@@ -353,8 +358,8 @@ SMAHomeManager.prototype = {
 			let serialNumber;
 			let firmwareRevision;
 
-			// Read serial number.
-			client.readHoldingRegisters(30057, 10, function(err, data) {
+			// Read serial number (U32, RAW).
+			client.readHoldingRegisters(30057, 2, function(err, data) {
 				serialNumber = data.buffer.readUInt32BE();
 				if (firmwareRevision) {
 					this.discovered.inverter = {
@@ -364,8 +369,8 @@ SMAHomeManager.prototype = {
 				}
 			}.bind(this));
 
-			//  Read firmware version.
-			client.readHoldingRegisters(40063, 10, function(err, data) {
+			//  Read firmware version (U32, FW).
+			client.readHoldingRegisters(40063, 2, function(err, data) {
 				// Per section 3.5.9, "SMA Firmware Data Formats":
 				// - Byte 1: BCD-coded "major" version
 				const major = data.buffer.slice(0, 1).readUint8();
@@ -416,8 +421,8 @@ SMAHomeManager.prototype = {
 			const date = new Date();
 			client.readHoldingRegisters(30581, 4).then((data) => {
 				const currentTotals = {
-					totalImport: data.buffer.slice(0, 4).readUInt32BE() / 1000,
-					totalExport: data.buffer.slice(4, 8).readUInt32BE() / 1000,
+					totalImport: data.buffer.slice(0, 4).readUInt32BE() / 1000, // Wh, U32, FIX0: 0 decimals
+					totalExport: data.buffer.slice(4, 8).readUInt32BE() / 1000, // Wh, U32, FIX0: 0 decimals
 				};
 				if (this.computedToday.day != date.getDate()) {
 					this.computedToday = {
@@ -437,8 +442,8 @@ SMAHomeManager.prototype = {
 
 			const inverter = this.live.getServiceById(Service.CustomPowerMonitor);
 
-			// Inverter: StatusActive & StatusFault characteristics
-			client.readHoldingRegisters(30201, 10, function(err, data) {
+			// Inverter: StatusActive & StatusFault characteristics (U32, ENUM).
+			client.readHoldingRegisters(30201, 2, function(err, data) {
 				const condition = data.buffer.readUInt32BE();
 				// 35 = Fault
 				if (condition === 35) {
@@ -462,25 +467,25 @@ SMAHomeManager.prototype = {
 
 			// Only when solar panels are currently producing can we set A & V.
 			if (this.currentMeasurementIndex && this.measurements[this.currentMeasurementIndex].production > 0) {
-				// Eve - Amperes
-				client.readHoldingRegisters(30977, 10, function(err, data) {
-					if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+				// Eve - Amperes (S32, FIX3: 3 decimals)
+				client.readHoldingRegisters(30977, 2, function(err, data) {
+					if (!data.buffer.equals(SMA_MODBUS_S32_NAN_VALUE)) {
 						inverter.getCharacteristic(Characteristic.CustomAmperes).updateValue(data.buffer.readUInt32BE() / 1000);
 					}
 				}.bind(this));
 
-				// Eve - Volts
-				client.readHoldingRegisters(30783, 10, function(err, data) {
-					if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*100) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+				// Eve - Volts (U32, FIX2: 2 decimals).
+				client.readHoldingRegisters(30783, 2, function(err, data) {
+					if (!data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
 						inverter.getCharacteristic(Characteristic.CustomVolts).updateValue(data.buffer.readUInt32BE() / 100);
 					}
 				}.bind(this));
 			}
 
-			// Eve - kWh
-			client.readHoldingRegisters(30535, 10, function(err, data) {
+			// Eve - kWh (Wh, U32, FIX0: 0 decimals)
+			client.readHoldingRegisters(30535, 2, function(err, data) {
 				let productionToday = 0;
-				if(data.buffer.readUInt32BE() > 0 && data.buffer.readUInt32BE() <= (65535*1000) && typeof data.buffer.readUInt32BE() == 'number' && Number.isFinite(data.buffer.readUInt32BE())) {
+				if (data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
 					productionToday = data.buffer.readUInt32BE() / 1000;
 				}
 
@@ -547,12 +552,10 @@ SMAHomeManager.prototype = {
 			}
 
 			// Read the live production from the inverter, to minimize the time offset
-			// relative to the received energy manager datagram.
+			// relative to the received energy manager datagram (S32, FIX0: 0 decimals).
 			const before = performance.now();
 			client.readHoldingRegisters(30775, 2).then((data) => {
-				const watts = data.buffer.readInt32BE();
-				// Negative numbers are returned when there is no production.
-				return watts >= 0 ? watts : 0;
+				return data.buffer.equals(SMA_MODBUS_S32_NAN_VALUE) ? 0 : data.buffer.readInt32BE();
 			})
 			.then((producedWatts) => {
 				const estimatedMsOffset = performance.now() - before;
