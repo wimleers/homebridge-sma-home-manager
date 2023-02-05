@@ -637,12 +637,12 @@ SMAHomeManager.prototype = {
 				.map(m => m.import)
 				.findLastIndex(w => w > 0);
 			offGridSignal.getCharacteristic(Characteristic.On).updateValue(offGridSeconds >= 60);
-			let offGridReason = 'Import > 0 W in past minute.';
+			let offGridReason = 'Import > 0 W in past min.';
 			if (offGridSeconds > 0 && offGridSeconds < 60) {
-				offGridReason = 'Import = 0 W, but for less than 1 minute.';
+				offGridReason = 'Import = 0 W, but for < 1 min.';
 			}
 			else if (offGridSeconds >= 60) {
-				offGridReason = `Import = 0 W for >= ${parseInt(offGridSeconds / 60)} minutes.`;
+				offGridReason = `Import = 0 W for ≥ ${parseInt(offGridSeconds / 60)} mins.`;
 			}
 			offGridSignal.getCharacteristic(Characteristic.CustomReason).updateValue(offGridReason);
 		}
@@ -663,10 +663,10 @@ SMAHomeManager.prototype = {
 			noSunSignal.getCharacteristic(Characteristic.CustomReason).updateValue(noSunSeconds > 0
 				? (
 					producedSomeWattsToday
-					? `Production = 0 W for ${noSunSeconds >= 900 ? '>=' : '' + Math.round(noSunSeconds / 60) + ' <'} 15 minutes.`
+					? `Production = 0 W for ${noSunSeconds >= 900 ? '≥' : '' + Math.round(noSunSeconds / 60) + ' <'} 15 mins.`
 					: 'Awaiting first ray of sunlight…'
 				)
-				: 'Production > 0 W in past minute.'
+				: 'Production > 0 W in past min.'
 			);
 		}
 		// Update highImport signal, if enabled.
@@ -681,7 +681,7 @@ SMAHomeManager.prototype = {
 				: avgImportWattsLast15Min
 			);
 			highImportSignal.getCharacteristic(Characteristic.On).updateValue(avgImportWattsLast15Min > 2500);
-			highImportSignal.getCharacteristic(Characteristic.CustomReason).updateValue(`Average import = ${ Math.round(avgImportWattsLast15Min/100) / 10 } kW ${avgImportWattsLast15Min > 2500 ? '>' : '<='} 2.5 kW in the last ${Math.round(sequentialMeasurements.length / 60)} minutes.`);
+			highImportSignal.getCharacteristic(Characteristic.CustomReason).updateValue(`${Math.round(sequentialMeasurements.length / 60)} min mean import ≅ ${ Math.round(avgImportWattsLast15Min/100) / 10 } ${avgImportWattsLast15Min > 2500 ? '>' : '≤'} 2.5 kW.`);
 		}
 
 		let accumulatedSurplusWatts = 0;
@@ -694,7 +694,7 @@ SMAHomeManager.prototype = {
 			const service = this.signals[signal.id].getServiceById(Service.CustomEnergySignal);
 			// Don't toggle the surplus signal unless there's actually enough samples.
 			if (surplusMeasurements.length < samplesForSignal) {
-				service.getCharacteristic(Characteristic.CustomReason).updateValue(`Less than ${signal.minutes} of data …`);
+				service.getCharacteristic(Characteristic.CustomReason).updateValue(`< ${signal.minutes} mins of data …`);
 				return;
 			}
 			const min = sortedSamplingWindow.reduce((min, value) => Math.min(min, value), Infinity);
@@ -703,12 +703,14 @@ SMAHomeManager.prototype = {
 			// `signal.watts`, and 90% of the time it should also cover the base load
 			// variability. (To avoid frequent toggling.)
 			const hasSurplus = min > signal.watts && p90 > signal.watts + this.baseLoadVariability + accumulatedSurplusWatts;
-			let reason = `Production surplus <= ${signal.watts} W for >= ${signal.minutes} minutes.`;
+			let reason = `Surplus ≤ ${signal.watts} W for ≥ ${signal.minutes} mins.`;
 			if (!hasSurplus && min > signal.watts) {
-				reason = `Production surplus > ${signal.watts} W for >= ${signal.minutes} minutes, but did not cover base load variability.`;
+				// Note: use of the "greater than or approximate" sign to succinctly indicate base load is not covered.
+				reason = `Surplus ⪆ ${signal.watts} W for ≥ ${signal.minutes} mins.`;
 			}
 			else if (hasSurplus) {
-				reason = `Production surplus > ${signal.watts} W and also covers base load variability for >= ${signal.minutes} minutes.`;
+				// Note: use the "much greater than" sign to succinctly indicate base load is also covered.
+				reason = `Surplus ≫ ${signal.watts} W for ≥ ${signal.minutes} mins.`;
 			}
 			service.getCharacteristic(Characteristic.On).updateValue(hasSurplus);
 			service.getCharacteristic(Characteristic.CustomReason).updateValue(reason);
