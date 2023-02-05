@@ -220,10 +220,10 @@ function SMAHomeManager(log, config, api) {
 	inherits(Service.CustomEnergySignal, Service);
 	Service.CustomEnergySignal.UUID = '30000000-0000-1000-8000-000019880120';
 
-	// Connect to SMA Sunny boy inverter via ModBus.
-	this._connect();
+	// Connect to SMA inverter via ModBus. Sporadic updates suffice because they affect only general status, V, A and daily totals;. SMA Home Manager provides the live data.
+	this._connectToInverter();
 	setInterval(function() {
-		this._refresh();
+		this._readInverterData();
 	}.bind(this), 60 * 1000);
 
 	// Listen to SMA Home Manager Speedwire datagrams.
@@ -332,25 +332,18 @@ SMAHomeManager.prototype = {
 		callback();
 	},
 
-	_connect: function() {
-		this.log.debug("Attempting connection with inverter", this.inverterAddress);
-
-		// Connect to the ModBus server IP address
+	_connectToInverter: function() {
+		this.log.debug("Connecting to inverter.");
 		try {
 			client.connectTCP(this.inverterAddress);
+			// See SMA-Modbus-general-TI-en-10.pdf.
+			client.setID(3);
+			this.log.debug("Successfully connected to inverter.");
 		}
 		catch(err) {
-			this.log.debug("Connection attempt failed");
+			this.log.error("Failed to connect to inverter.", err);
 			return;
 		}
-
-		try {
-			// Set the ModBus Id to use
-			client.setID(3);
-
-			this.log.debug("Connection successful");
-		}
-		catch(err) {this.log("Could not set the Channel Number");}
 	},
 
 	_readInverterMetadata: function () {
@@ -414,12 +407,11 @@ SMAHomeManager.prototype = {
 			}.bind(this));
 	},
 
-	_refresh: function() {
+	_readInverterData: function() {
 		if (!this.launched) {
 			return;
 		}
 
-		// Obtain the values
 		try {
 			// Ensure this.computedToday remains up-to-date.
 			const date = new Date();
@@ -499,7 +491,6 @@ SMAHomeManager.prototype = {
 				}
 
 				// Compute today's numbers up to now.
-				// @see _refresh()
 				const exportToday = this.computedToday.now.totalExport - this.computedToday.start.totalExport;
 				const importToday = this.computedToday.now.totalImport - this.computedToday.start.totalImport;
 
@@ -519,10 +510,8 @@ SMAHomeManager.prototype = {
 			}.bind(this));
 		}
 		catch(err) {
-			this.log("Refresh failed", "Attempting reconnect...", err);
-
-			// Attempt to reconnect
-			this._connect();
+			this.log.error("Reading inverter data failed, will attempt to reconnect. Error:", err);
+			this._connectToInverter();
 		}
 	},
 
