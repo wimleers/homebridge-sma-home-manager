@@ -36,7 +36,8 @@ const inherits = require("util").inherits,
 	dgram = require('dgram');
 
 const PLATFORM = 'SMAHomeManager';
-const PLUGIN_NAME = 'homebridge-sma-home-manager';
+const PACKAGE = require('./package.json');
+const PLUGIN_NAME = PACKAGE.name;
 
 var client = new ModbusRTU();
 
@@ -53,9 +54,7 @@ module.exports = function(homebridge) {
 };
 
 function SMAHomeManager(log, config, api) {
-	// General.
 	this.log = log;
-	this.name = config["name"] || "Solar Panels";
 
 	// Platform state.
 	// @see APIEvent.DID_FINISH_LAUNCHING
@@ -270,7 +269,7 @@ SMAHomeManager.prototype = {
 		accessory.getService(Service.AccessoryInformation)
 			// @see https://github.com/homebridge/HAP-NodeJS/issues/940#issuecomment-1111470278
 			.setCharacteristic(Characteristic.Manufacturer, 'SMA Solar Technology AG')
-			.setCharacteristic(Characteristic.Model, 'Sunny Boy & SMA Home Manager 2.0')
+			.setCharacteristic(Characteristic.Model, 'Sunny Boy & Home Manager 2.0')
 			.setCharacteristic(Characteristic.SerialNumber, serialNumbers)
 			.setCharacteristic(Characteristic.FirmwareRevision, firmwareRevisions);
 	},

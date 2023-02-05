@@ -32,7 +32,7 @@
   "license": "GPL-2.0-or-later",
   "main": "index.js",
   "name": "homebridge-sma-home-manager",
-  "displayName": "Homebridge SMA Home Manager & Inverter",
+  "displayName": "SMA Home Manager & Inverter",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wimleers/homebridge-sma-home-manager.git"

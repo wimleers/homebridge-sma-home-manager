@@ -6,15 +6,6 @@
   "schema": {
     "type": "object",
     "properties": {
-      "name": {
-        "title": "Accessory Name",
-        "type": "string",
-        "format": "string",
-        "default": "Solar panels",
-        "description": "The name of your device to show in the Home app",
-        "minLength": 1,
-        "required": false
-      },
       "signals": {
         "title": "Energy Signals",
         "type": "object",
@@ -66,23 +57,6 @@
   },
   "layout": [
     {
-      "type": "flex",
-      "flex-flow": "row wrap",
-      "items": [
-        {
-          "key": "name",
-          "type": "string"
-        }
-      ]
-    },
-    {
-      "type": "fieldset",
-      "title": "Advanced configuration",
-      "expandable": true,
-      "items": [
-      ]
-    },
-    {
       "type": "fieldset",
       "title": "Energy Signals",
       "expandable": true,
@@ -92,7 +66,7 @@
         "signals.noSun",
         "signals.highImport",
         {
-          "title": "PV Surplus",
+          "title": "PV Surplus Signals",
           "key": "surplusSignals",
           "type": "array",
           "items": [
@@ -119,7 +93,6 @@
                   "notitle": true,
                   "placeholder": "Minutes"
                 }
-
               ]
             }
           ]
