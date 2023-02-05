@@ -117,41 +117,41 @@ function SMAHomeManager(log, config, api) {
 	this.baseLoadVariability = 50;
 
 	// Define non-standard characteristics.
-	const realPowerProps = {
+	const commonProps = {
 		format: Characteristic.Formats.FLOAT,
+		perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
+	};
+	const realPowerProps = {
+		...commonProps,
 		unit: 'W',
 		minValue: 0,
 		maxValue: maxRealPowerTransmissionCapability,
 		minStep: 0.1,
-		perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
 	};
 	const energyProps = {
-		format: Characteristic.Formats.FLOAT,
+		...commonProps,
 		unit: 'kWh',
 		minValue: 0,
 		maxValue: 65535,
 		minStep: 0.001,
-		perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
 	};
 	const nonStandardCharacteristics = {
 		// Eve characteristics.
 		CustomWatts: { uuid: 'E863F10D-079E-48FF-8F27-9C2605A29F52', name: 'Consumption', props: realPowerProps },
 		CustomKilowattHours: { uuid: 'E863F10C-079E-48FF-8F27-9C2605A29F52', name: 'Total Consumption', props: energyProps },
 		CustomAmperes: { uuid: 'E863F126-079E-48FF-8F27-9C2605A29F52', name: 'Amperes', props: {
-			format: Characteristic.Formats.FLOAT,
+			...commonProps,
 			unit: 'A',
 			minValue: 0,
 			maxValue: maxAmperes,
 			minStep: 0.01,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
 		}},
 		CustomVolts: { uuid: 'E863F10A-079E-48FF-8F27-9C2605A29F52', name: 'Volts', props: {
-			format: Characteristic.Formats.FLOAT,
+			...commonProps,
 			unit: 'V',
 			minValue: 0,
 			maxValue: maxVolts,
 			minStep: 0.1,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY]
 		}},
 		// Our characteristics.
 		CustomProduction: { uuid: '00000001-0000-1000-8000-000019880120', name: 'Production', props: realPowerProps },
@@ -161,17 +161,16 @@ function SMAHomeManager(log, config, api) {
 		CustomKilowattHoursImport: { uuid: '00000012-0000-1000-8000-000019880120', name: 'Total Import', props: { ...energyProps, unit: 'kWh-' } },
 		CustomKilowattHoursExport: { uuid: '00000013-0000-1000-8000-000019880120', name: 'Total Export', props: { ...energyProps, unit: 'kWh+' } },
 		CustomSelfSufficiency: { uuid: '00000021-0000-1000-8000-000019880120', name: 'Self-Sufficiency', props: {
-			format: Characteristic.Formats.FLOAT,
+			...commonProps,
 			unit: Characteristic.Units.PERCENTAGE,
 			minValue: -100,
 			maxValue: 1000,
 			minStep: 1,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
 		}},
 		CustomReason: { uuid: '00001000-0000-1000-8000-000019880120', name: 'Reason', props: {
+			...commonProps,
 			format: Characteristic.Formats.STRING,
 			maxLen: 256,
-			perms: [Characteristic.Perms.READ, Characteristic.Perms.NOTIFY],
 		}},
 	};
 	Object.keys(nonStandardCharacteristics).forEach(characteristic => {
@@ -885,16 +884,6 @@ SMAHomeManager.prototype = {
 		*/
 
 		return [timestamp, netWatts];
-	},
-
-	_makeReadonly(characteristic) {
-		const readonlyPerms = [
-			"pr" /* PAIRED_READ */,
-			"ev" /* NOTIFY */,
-		];
-		characteristic.setProps({
-			perms: characteristic.props.perms.filter(function (p) { return readonlyPerms.includes(p); })
-		});
 	}
 
 };
