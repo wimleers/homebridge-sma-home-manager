@@ -2,7 +2,8 @@
   "pluginAlias": "SMAHomeManager",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": null,
+  "headerDisplay": "⚠️ For the best experience, follow the <a href=\"#SMAHomeManager-recommendations\">recommendations</a>.",
+  "footerDisplay": "<h6 id=\"SMAHomeManager-recommendations\">Recommendations</h6><ol><li>run this plugin in an isolated child bridge <sup>because the SMA Home Manager broadcasts energy flow updates <em>every second!</em></sup></li><li>place this plugin's accessories in an \"Energy\" or \"Electricity\" room in, in a \"Utilities\" zone (you can put a \"Climate\" room in this zone too, for ventilation, heating and cooling).</li><li>Use the Eve, Home+ or Controller app to create energy-related automations (Apple's Home app does not support this).</li></ol>",
   "schema": {
     "type": "object",
     "properties": {
@@ -14,25 +15,25 @@
             "title": "Off Grid",
             "type": "boolean",
             "default": true,
-            "description": "When there has been 0 W imported from the grid for >=1 minutes (>=60 seconds)."
+            "description": "When 0 W is imported from the grid for the past minute."
           },
           "noSun": {
             "title": "No Sun",
             "type": "boolean",
             "default": true,
-            "description": "When there has been 0 W of production for >=15 minutes (>=900 seconds)."
+            "description": "When 0 W is produced during the past 15 minutes."
           },
           "highImport": {
             "title": "High Grid Import",
             "type": "boolean",
             "default": false,
-            "description": "When there has been on average >2500 W of imports for >=15 minutes. Your distribution network operator might charge you extra."
+            "description": "When the 15 minute mean import is >2500 W. Some distribution network operators charge extra to reduce peak load on their infrastructure. Use this signal to apply peak load shaving.<br><small>For example <a href=\"https://www.energyaustralia.com.au/home/electricity-and-gas/compare-electricity-and-gas-plans/tariffs\">\"demand tariff or capacity charge\" in Australia</a> (30 min window during peak hours), <a href=\"https://www.fluvius.be/nl/thema/factuur-en-tarieven/capaciteitstarief/gezinnen-en-kleine-ondernemingen/wat-is-het\">\"capacity tariff\" in Belgium</a> (≥ 2.5 kW in any 15 min window).</small>"
           }
         }
       },
       "surplusSignals": {
         "title": "PV Surplus Signals",
-        "description": "Avoid exporting solar energy to the grid: consume it yourself, whenever the necessary surplus is available!",
+        "description": "Avoid exporting solar energy to the grid: consume it yourself, whenever the necessary surplus is available!<br><small>Note: order matters: the surplus signals will be evaluated from first to last.</small>",
         "type": "array",
         "items": {
           "title": "PV Surplus Signal",
@@ -60,7 +61,7 @@
       "type": "fieldset",
       "title": "Energy Signals",
       "expandable": true,
-      "expanded": true,
+      "expanded": false,
       "items": [
         "signals.offGrid",
         "signals.noSun",
