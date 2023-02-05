@@ -227,7 +227,7 @@ function SMAHomeManager(log, config, api) {
 	}.bind(this), 60 * 1000);
 
 	// Listen to SMA Home Manager Speedwire datagrams.
-	this._startListener();
+	this._listenToHomeManager();
 
 	// Launch after both inverter & energy manager are discovered.
 	setInterval(function() {
@@ -515,18 +515,19 @@ SMAHomeManager.prototype = {
 		}
 	},
 
-	_startListener: function() {
+	_listenToHomeManager: function() {
 		this.socket = dgram.createSocket({type: 'udp4', reuseAddr: true});
 
 		this.socket.on('error', function(err) {
-			this.log.error('SMA Home Manager listening error!');
+			this.log.error("Listening to SMA Home Manager failed, will attempt to reconnect. Error:", err);
 			this.importRealtime.getCharacteristic(Characteristic.On).updateValue(false);
 			this.exportRealtime.getCharacteristic(Characteristic.On).updateValue(false);
 			this.importService.getCharacteristic(Characteristic.On).updateValue(false);
 			this.exportService.getCharacteristic(Characteristic.On).updateValue(false);
-			this.log.error(err);
 			this.clearInterval(this.multicastMembershipIntervalId);
-			this._restartListener();
+			this.socket.close(function() {
+				setTimeout(this._listenToHomeManager.bind(this), 10 * 1000)
+			}.bind(this));
 		}.bind(this));
 
 		this.socket.on('listening', function() {
@@ -736,16 +737,6 @@ SMAHomeManager.prototype = {
 		this.log.debug('Dropping and re-adding multicast membership');
 		this.socket.dropMembership(this.homeManagerAddress);
 		this.socket.addMembership(this.homeManagerAddress);
-	},
-
-	_stopListener: function(cb) {
-		this.socket.close(cb);
-	},
-
-	_restartListener: function() {
-		this._stopListener(function() {
-			setTimeout(this.startListener.bind(this), 10 * 1000)
-		}.bind(this));
 	},
 
 	_getChannelTypeFromObisHeader: function(obis) {
