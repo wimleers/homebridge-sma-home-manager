@@ -452,7 +452,7 @@ SMAHomeManager.prototype = {
 			// Eve - kWh (Wh, U32, FIX0: 0 decimals)
 			client.readHoldingRegisters(30535, 2, function(err, data) {
 				let productionToday = 0;
-				if (data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
+				if (!data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
 					productionToday = data.buffer.readUInt32BE() / 1000;
 				}
 
