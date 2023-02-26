@@ -1,6 +1,7 @@
 {
   "author": {
-    "name": "Wim Leers"
+    "name": "Wim Leers",
+    "url": "https://wimleers.com"
   },
   "contributors": [
     { "name": "codyc1515" }
@@ -27,7 +28,11 @@
     "solar",
     "inverter",
     "sunny boy",
-    "home manager"
+    "home manager",
+    "energy manager",
+    "energy management",
+    "ems",
+    "hems"
   ],
   "license": "GPL-2.0-or-later",
   "main": "index.js",
@@ -40,5 +45,5 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "version": "0.0.0"
+  "version": "1.0.0"
 }
