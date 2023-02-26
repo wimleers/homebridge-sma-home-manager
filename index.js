@@ -698,8 +698,8 @@ SMAHomeManager.prototype = {
 		if (m.import > 0) {
 			return Math.min((m.production - m.export) / m.consumption * 100, 99);
 		}
-		// 0–10000%: production, no import.
-		return m.production / m.consumption * 100;
+		// 100–1000%: production, no import. (Limit to 1000%: 10⨉ consumption!)
+		return Math.max(m.production / m.consumption * 100, 10000);
 	},
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
