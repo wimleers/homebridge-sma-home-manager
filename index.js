@@ -83,7 +83,7 @@ function SMAHomeManager(log, config, api) {
 	// Functionality on top of both the inverter & energy manager.
 	this.signalsConfig = {
 		builtIn: config.signals,
-		surplus: config.surplusSignals,
+		surplus: config.surplusSignals || [],
 	};
 	// For small variations, like lights etc, which should be excluded from the PV surplus.
 	this.baseLoadVariability = 50;
@@ -598,8 +598,8 @@ SMAHomeManager.prototype = {
 		pmRecent.getCharacteristic(Characteristic.CustomSelfSufficiency).updateValue(this._computeSelfSufficiencyLevel(r));
 
 		// Update offGrid signal, if enabled.
-		const offGridSignal = this.signals.offGrid.getServiceById(Service.CustomEnergySignal);
-		if (offGridSignal) {
+		if (this.signals.offGrid) {
+			const offGridSignal = this.signals.offGrid.getServiceById(Service.CustomEnergySignal);
 			const offGridSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.import)
 				.findLastIndex(w => w > 0);
@@ -614,8 +614,8 @@ SMAHomeManager.prototype = {
 			offGridSignal.getCharacteristic(Characteristic.CustomReason).updateValue(offGridReason);
 		}
 		// Update noSun signal, if enabled.
-		const noSunSignal = this.signals.noSun.getServiceById(Service.CustomEnergySignal);
-		if (noSunSignal) {
+		if (this.signals.noSun) {
+			const noSunSignal = this.signals.noSun.getServiceById(Service.CustomEnergySignal);
 			const noSunSeconds = sequentialMeasurements.length - 1 - sequentialMeasurements
 				.map(m => m.production)
 				.findLastIndex(w => w > 0);
@@ -637,8 +637,8 @@ SMAHomeManager.prototype = {
 			);
 		}
 		// Update highImport signal, if enabled.
-		const highImportSignal = this.signals.highImport.getServiceById(Service.CustomEnergySignal);
-		if (highImportSignal) {
+		if (this.signals.highImport) {
+			const highImportSignal = this.signals.highImport.getServiceById(Service.CustomEnergySignal);
 			const avgImportWattsLast15Min = sequentialMeasurements.slice(-15 * 60)
 				.map(m => m.import)
 				.reduce(this._reduceToAvg, 0);
