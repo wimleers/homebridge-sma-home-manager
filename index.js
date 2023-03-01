@@ -699,7 +699,7 @@ SMAHomeManager.prototype = {
 			return Math.min((m.production - m.export) / m.consumption * 100, 99);
 		}
 		// 100–1000%: production, no import. (Limit to 1000%: 10⨉ consumption!)
-		return Math.min(m.production / m.consumption * 100, 10000);
+		return Math.min(m.production / m.consumption * 100, 1000);
 	},
 
 	// TRICKY: https://github.com/nodejs/node/issues/39377
