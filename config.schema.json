@@ -7,6 +7,13 @@
   "schema": {
     "type": "object",
     "properties": {
+      "ip_inverter": {
+        "title": "SMA Inverter IP",
+        "type": "string",
+        "default": "169.254.12.3",
+        "description": "The ip address of you SMA inverter (Tri-Power, Sunny Boy, …)"
+        }
+      },
       "signals": {
         "title": "Energy Signals",
         "type": "object",

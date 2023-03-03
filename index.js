@@ -59,7 +59,8 @@ function SMAHomeManager(log, config, api) {
 
 	// Inverter: SMA Sunny Boy.
 	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
-	this.inverterAddress = '169.254.12.3';
+	// this.inverterAddress = '169.254.12.3';
+	this.inverterAddress = config.ip_inverter;
 	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579.
 	// Consequently, today's "net export" and "net import" need to be computed
 	// from total net export ("feed in counter", 30583) & total net import
