@@ -735,6 +735,8 @@ SMAHomeManager.prototype = {
 		const expectedTag2 = Buffer.from([0x00, 0x10]);
 		const protocolIdForEnergyMeter = Buffer.from([0x60, 0x69]);
 		const protocolIdForSpeedwireDiscovery = Buffer.from([0x60, 0x65]);
+		// Since inverter firmware 4.00.75.R: "Unicast protocol for reliable communication between inverter and meter".
+		const protocolIdForInverterCommunicationDiscovery = Buffer.from([0x60, 0x81]);
 
 		// 1. Check expected header (bytes 0–3).
 		var header = datagram.slice(0, 4);
@@ -753,10 +755,13 @@ SMAHomeManager.prototype = {
 		var protocolId = datagram.slice(16, 18);
 		if (!protocolId.equals(protocolIdForEnergyMeter)) {
 			if (protocolId.equals(protocolIdForSpeedwireDiscovery)) {
-				// this.log.debug('Valid datagram found, but for Speedwire discovery. Ignoring.');
+				this.log.debug('Valid datagram found, but for Speedwire discovery. Ignoring.', protocolId);
+			}
+			else if (protocolId.equals(protocolIdForInverterCommunicationDiscovery)) {
+				this.log.debug('Valid datagram found, but for inverter communication discovery. Ignoring.', protocolId);
 			}
 			else {
-				this.log.error('Valid datagram found, but with unknown structure. Discarding.', protocolId);
+				this.log.warn('Valid datagram found, but with unknown protocol. Discarding.', protocolId, datagram);
 			}
 			return false;
 		}
