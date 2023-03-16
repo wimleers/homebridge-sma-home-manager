@@ -210,12 +210,12 @@ function SMAHomeManager(log, config, api) {
 	setInterval(function() {
 		this._readInverterMetadata();
 		if (this.accessoriesCallback) {
+			this.log.info('Discovered SMA inverter:', this.discovered.inverter ? this.discovered.inverter : 'no');
+			this.log.info('Discovered SMA energy manager:', this.discovered.energyManager ? this.discovered.energyManager : 'no');
 			if (this.discovered.inverter && this.discovered.energyManager) {
 				// Prevent race condition: store the callback locally and overwrite it.
 				const callback = this.accessoriesCallback;
 				this.accessoriesCallback = false;
-
-				this.log.debug('Discovered', this.discovered);
 
 				// Expose serial numbers & firmware revisions.
 				this._setAccessoryInformation(this.live);
@@ -230,10 +230,6 @@ function SMAHomeManager(log, config, api) {
 					...Object.values(this.signals),
 				])
 				this.launched = true;
-			}
-			else {
-				this.log.info('Discovered SMA inverter:', this.discovered.inverter ? this.discovered.inverter : 'no');
-				this.log.info('Discovered SMA energy manager:', this.discovered.energyManager ? this.discovered.energyManager : 'no');
 			}
 		}
 	}.bind(this), 1000);
