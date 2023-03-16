@@ -1,6 +1,7 @@
 const inherits = require("util").inherits,
 	ModbusRTU = require("modbus-serial"),
-	dgram = require('dgram');
+	dgram = require('dgram'),
+	Bonjour = require('bonjour-service').Bonjour;
 
 const PLATFORM = 'SMAHomeManager';
 const PACKAGE = require('./package.json');
@@ -13,6 +14,7 @@ const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
 const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
 
 var client = new ModbusRTU();
+var bonjour = new Bonjour();
 
 var Service, Characteristic, Accessory;
 
@@ -58,8 +60,12 @@ function SMAHomeManager(log, config, api) {
 	});
 
 	// Inverter: SMA Sunny Boy.
-	// Hardcoded address and hence zero config thanks to https://manuals.sma.de/SBSxx-10/en-US/1685190283.html.
-	this.inverterAddress = '169.254.12.3';
+	// Its link-local address 169.254.12.3 unfortunately does not work on Linux.
+	// Also, SMA decided to use it to commission devices other than inverters,
+	// making it an unreliable mechanism. Use mDNS/DNS-SD to discover its address.
+	// @see _findInverter()
+	this.inverterAddress = null;
+	this.inverterModBusConnectionLive = false;
 	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579.
 	// Consequently, today's "net export" and "net import" need to be computed
 	// from total net export ("feed in counter", 30583) & total net import
@@ -192,11 +198,10 @@ function SMAHomeManager(log, config, api) {
 	inherits(Service.CustomEnergySignal, Service);
 	Service.CustomEnergySignal.UUID = '30000000-0000-1000-8000-000019880120';
 
-	// Connect to SMA inverter via ModBus. Sporadic updates suffice because they affect only general status, V, A and daily totals;. SMA Home Manager provides the live data.
-	this._connectToInverter();
-	setInterval(function() {
-		this._readInverterData();
-	}.bind(this), 60 * 1000);
+	// Find SMA inverter via mDNS/DNS-SD, then connect to it via ModBus.
+	this._findInverter(function() {
+		this._connectToInverter();
+	}.bind(this));
 
 	// Listen to SMA Home Manager Speedwire datagrams.
 	this._listenToHomeManager();
@@ -304,21 +309,57 @@ SMAHomeManager.prototype = {
 		callback();
 	},
 
+	_findInverter: function(callback) {
+		this.log.debug('Finding inverter using mDNS/DNS-SD…');
+		let firstMatch = true;
+		bonjour.find({ type: 'http' }, function (service) {
+			// Robustness principle: match both SMA123456789.local as well as
+			// SMA123456789-3.local (observed IRL!).
+			const hostMatch = service.host.match(/SMA\d+/);
+			// Also require a name match, to avoid discovering non-inverter  devices.
+			const nameMatch = service.name.startsWith('Website for SMA-Inverter');
+			if (hostMatch && nameMatch) {
+				this.log.debug('Found inverter DNS-SD service:', service);
+				this.inverterAddress = service.referer.address;
+				if (firstMatch) {
+					firstMatch = false;
+					this.log.warn(`Found inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address}.`);
+					callback();
+				}
+				else {
+					// bonjour.destroy() is not called: keeps this.inverterAddress up-to-date.
+					this.log.warn(`Detected a restarted inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address}. Next inverter reconnection will use this address.`);
+				}
+			}
+		}.bind(this));
+	},
+
 	_connectToInverter: function() {
-		this.log.debug("Connecting to inverter.");
-		try {
-			client.connectTCP(this.inverterAddress);
-			client.setID(SMA_MODBUS_CLIENT_ID);
-			this.log.debug("Successfully connected to inverter.");
-		}
-		catch(err) {
-			this.log.error("Failed to connect to inverter.", err);
+		if (this.inverterAddress === null) {
+			this.log.debug('Waiting for inverter IP address to be found…');
 			return;
 		}
+		this.log.debug(`Connecting to inverter at ${this.inverterAddress}.`);
+		client.setID(SMA_MODBUS_CLIENT_ID);
+		// Connect to SMA inverter via ModBus.
+		client.connectTCP(this.inverterAddress)
+			.then(function() {
+				this.log.debug("Successfully connected to inverter.");
+				this.inverterModBusConnectionLive = true;
+				// Sporadic updates suffice because they affect only general status, V, A
+				// and daily totals. SMA Home Manager provides the live data.
+				setInterval(function() {
+					this._readInverterData();
+				}.bind(this), 60 * 1000);
+			}.bind(this))
+			.catch(function(err) {
+				this.log.error("Failed to connect to inverter.", err);
+				return;
+			}.bind(this));
 	},
 
 	_readInverterMetadata: function () {
-			if (this.discovered.inverter) {
+			if (!this.inverterModBusConnectionLive || this.discovered.inverter) {
 				return;
 			}
 
@@ -482,6 +523,7 @@ SMAHomeManager.prototype = {
 		}
 		catch(err) {
 			this.log.error("Reading inverter data failed, will attempt to reconnect. Error:", err);
+			this.inverterModBusConnectionLive = false;
 			this._connectToInverter();
 		}
 	},

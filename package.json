@@ -12,7 +12,8 @@
   "dependencies": {
     "modbus-serial": "^7.7.3",
     "utils": "^0.3.1",
-    "node-persist": "^2.1.0"
+    "node-persist": "^2.1.0",
+    "bonjour-service": "^1.1.0"
   },
   "description": "SMA Home Manager & Inverter plug-in for Homebridge",
   "devDependencies": {},

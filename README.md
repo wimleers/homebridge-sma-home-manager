@@ -65,7 +65,7 @@ This was forked from <https://github.com/codyc1515/homebridge-sma-inverter>. Dif
 - Omitted the Eve-based history support which didn't quite work. Recommended alternative: [`sbfspot`](https://github.com/SBFspot/SBFspot) <sup>[`Docker` image](https://github.com/nakla/sbfspot)</sup> (which reads data locally, also via ModBus), and optionally upload let it upload your production data to <https://pvoutput.org> (easy to use UI)
 - Omitted the "Total". Observe that in SMA's `SMA Energy` app.
 - Stopped exposing the inverter's information as light sensors (pseudo-live, today, total).
-- Removed inverter IP address configuration in favor of [zero config thanks to a link-local address](https://manuals.sma.de/SBSxx-10/en-US/1685190283.html) instead.
+- Removed inverter IP address configuration in favor of ~[zero config thanks to a link-local address](https://manuals.sma.de/SBSxx-10/en-US/1685190283.html)~ [zero config thanks to mDNS/DNS-SD discovering the inverter](https://manuals.sma.de/SBSxx-10/en-US/1687859467.html) instead.
 - Many bugfixes.
 - Added support for SMA Home Manager, also using [zero config thanks to SMA Speedwire](https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.xhtml?search=sma-spw)
 - Added combined view of inverter & Home Manager's data.
