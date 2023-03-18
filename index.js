@@ -374,14 +374,25 @@ SMAHomeManager.prototype = {
 			}.bind(this));
 
 			//  Read firmware version (U32, FW).
-			client.readHoldingRegisters(40063, 2, function(err, data) {
+			client.readHoldingRegisters(40065, 2, function(err, data) {
+				// TRICKY: some inverters don't expose the firmware version: SBn.n-1AV-40.
+				if (data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
+					const firmwareRevision = 'unknown';
+					if (serialNumber) {
+						this.discovered.inverter = {
+							SerialNumber: serialNumber,
+							FirmwareRevision: firmwareRevision,
+						};
+					}
+					return;
+				}
+
 				// Per section 3.5.9, "SMA Firmware Data Formats":
 				// - Byte 1: BCD-coded "major" version
 				const major = data.buffer.slice(0, 1).readUint8();
 				// - Byte 2: BCD-coded "minor" version
 				const minor = data.buffer.slice(1, 2).readUint8();
 				// - Byte 3: non-BCD-coded "build" version
-				// @todo The third number should be 55, but the 0x35 being received is 53. Unsure how to parse.
 				let build = data.buffer.slice(2, 3).readUint8();
 				// Byte 4 contains teh release type with 0–5 mapped to a string, and >5 without special interpretation.
 				let releaseType = data.buffer.slice(3, 4).readUint8();
