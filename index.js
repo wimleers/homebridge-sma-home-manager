@@ -13,6 +13,10 @@ const SMA_MODBUS_CLIENT_ID = 3;
 const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
 const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
 
+// See SMA_Modbus-TI-en-23.xlsx.
+const SMA_DEVICE_CLASS_SOLAR_INVERTER = 8001;
+const SMA_DEVICE_CLASS_BATTERY_INVERTER = 8007;
+
 var client = new ModbusRTU();
 var bonjour = new Bonjour();
 
@@ -217,6 +221,16 @@ function SMAHomeManager(log, config, api) {
 				const callback = this.accessoriesCallback;
 				this.accessoriesCallback = false;
 
+				// For now, only solar inverters are supported.
+				if (this.discovered.inverter.DeviceClass !== 'solar inverter') {
+					this.log.error('The discovered inverter is not a solar inverter! Please create a bug report with as much detail as possible.');
+					// Stop listening to SMA Home Manager.
+					if (this.socket) {
+						this.socket.close();
+					}
+					return;
+				}
+
 				// Expose serial numbers & firmware revisions.
 				this._setAccessoryInformation(this.live);
 				this._setAccessoryInformation(this.recent);
@@ -359,14 +373,38 @@ SMAHomeManager.prototype = {
 				return;
 			}
 
+			let deviceClass;
 			let serialNumber;
 			let firmwareRevision;
+
+			// Read device class (U32, ENUM).
+			client.readHoldingRegisters(30051, 2, function(err, data) {
+				switch (data.buffer.readUInt32BE()) {
+					case SMA_DEVICE_CLASS_SOLAR_INVERTER:
+						deviceClass = 'solar inverter';
+						break;
+					case SMA_DEVICE_CLASS_BATTERY_INVERTER:
+						deviceClass = 'battery inverter';
+						break;
+					default:
+						deviceClass = 'unknown';
+						break;
+				}
+				if (serialNumber && firmwareRevision) {
+					this.discovered.inverter = {
+						DeviceClass: deviceClass,
+						SerialNumber: serialNumber,
+						FirmwareRevision: firmwareRevision,
+					};
+				}
+			}.bind(this));
 
 			// Read serial number (U32, RAW).
 			client.readHoldingRegisters(30057, 2, function(err, data) {
 				serialNumber = data.buffer.readUInt32BE();
-				if (firmwareRevision) {
+				if (deviceClass && firmwareRevision) {
 					this.discovered.inverter = {
+						DeviceClass: deviceClass,
 						SerialNumber: serialNumber,
 						FirmwareRevision: firmwareRevision,
 					};
@@ -378,8 +416,9 @@ SMAHomeManager.prototype = {
 				// TRICKY: some inverters don't expose the firmware version: SBn.n-1AV-40.
 				if (data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
 					const firmwareRevision = 'unknown';
-					if (serialNumber) {
+					if (deviceClass && serialNumber) {
 						this.discovered.inverter = {
+							DeviceClass: deviceClass,
 							SerialNumber: serialNumber,
 							FirmwareRevision: firmwareRevision,
 						};
