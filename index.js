@@ -615,7 +615,7 @@ SMAHomeManager.prototype = {
 			.then((producedWatts) => {
 				const estimatedMsOffset = performance.now() - before;
 				const [timestamp, netWatts] = this._parseDatagram(msg, rinfo);
-				this._processMeasurement(producedWatts, netWatts, timestamp);
+				this._processMeasurement(producedWatts, netWatts, timestamp, estimatedMsOffset);
 			})
 		}.bind(this));
 
@@ -628,7 +628,7 @@ SMAHomeManager.prototype = {
 	// 2. Updates HomeKit.
 	//
 	// (Should be called in regular intervals, 1 s assumed.)
-	_processMeasurement: function(producedWattsFromInverter, netWattsFromEnergyManager, timestampFromEnergyManager) {
+	_processMeasurement: function(producedWattsFromInverter, netWattsFromEnergyManager, timestampFromEnergyManager, estimatedMsOffsetInverter) {
 		// Capture the observations in a "measurement" object.
 		const importWatts = netWattsFromEnergyManager > 0 ? netWattsFromEnergyManager: 0;
 		const exportWatts = netWattsFromEnergyManager < 0 ? -netWattsFromEnergyManager: 0;
@@ -639,6 +639,10 @@ SMAHomeManager.prototype = {
 			production: producedWattsFromInverter,
 			consumption: importWatts + producedWattsFromInverter - exportWatts,
 		};
+		if (estimatedMsOffsetInverter > 1000 || measurement.consumption < 0) {
+			this.log.warn(`Inverter took ${estimatedMsOffsetInverter} ms to respond, resulting in an invalid measurement. Dropping measurement.`);
+			return;
+		}
 
 		// Store measurement and compute next measurement index.
 		var currentIndex = this.nextMeasurementIndex;
