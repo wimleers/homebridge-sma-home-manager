@@ -229,9 +229,9 @@ function SMAHomeManager(log, config, api) {
 				const callback = this.accessoriesCallback;
 				this.accessoriesCallback = false;
 
-				// For now, only solar inverters are supported.
-				if (this.discovered.inverter.DeviceClass !== 'solar inverter') {
-					this.log.error('The discovered inverter is not a solar inverter! Please create a bug report with as much detail as possible.', this.discovered);
+				// For now, only solar & hybrid inverters are supported.
+				if (!['solar inverter', 'hybrid inverter'].includes(this.discovered.inverter.DeviceClass)) {
+					this.log.error('The discovered inverter is not a solar or hybrid inverter! Please create a bug report with as much detail as possible.', this.discovered);
 					// Stop listening to SMA Home Manager.
 					if (this.socket) {
 						this.socket.close();
