@@ -2,11 +2,16 @@
   "DEVICE_CLASSES": [
     [8000, "all devices"],
     [8001, "solar inverter"],
-    [8002, "wind inverter"],
+    [8002, "wind turbine inverter"],
     [8007, "battery inverter"],
+    [8008, "charger station"],
+    [8009, "hybrid inverter"],
     [8033, "load"],
     [8064, "sensor technology general"],
     [8065, "energy meter"],
+    [8066, "gas meter"],
+    [8067, "generic meter"],
+    [8096, "tracker"],
     [8128, "communication products"]
   ]
 }

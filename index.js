@@ -9,6 +9,7 @@ const PLUGIN_NAME = PACKAGE.name;
 
 // Massage METADATA into useful data structures.
 // @see https://files.sma.de/downloads/ClusterController_MODBUS-TI-en-18.pdf
+// @see https://github.com/SBFspot/SBFspot/blob/master/SBFspot/TagListEN-US.txt
 const METADATA = require('./metadata.json');
 const arrayToMap = (array) => {
 	return JSON.parse(
