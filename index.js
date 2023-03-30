@@ -381,47 +381,42 @@ SMAHomeManager.prototype = {
 				return;
 			}
 
+			// Only register the inverter discovery after all metadata has been discovered.
 			let deviceClass;
+			let deviceType;
 			let serialNumber;
 			let firmwareRevision;
-
-			// Read device class (U32, ENUM).
-			client.readHoldingRegisters(30051, 2, function(err, data) {
-				const deviceClassId = data.buffer.readUInt32BE();
-				deviceClass = SMA_DEVICE_CLASSES.get(deviceClassId) || `unknown ${deviceClassId}`;
-				if (serialNumber && firmwareRevision) {
+			registerInverterDiscoveryIfComplete = function () {
+				if (deviceClass && deviceType && serialNumber && firmwareRevision) {
 					this.discovered.inverter = {
 						DeviceClass: deviceClass,
+						DeviceType: deviceType,
 						SerialNumber: serialNumber,
 						FirmwareRevision: firmwareRevision,
 					};
 				}
+			}.bind(this);
+
+			// Read device class (U32, ENUM).
+			client.readHoldingRegisters(30051, 4, function(err, data) {
+				const deviceClassId = data.buffer.slice(0, 4).readUInt32BE();
+				deviceType = data.buffer.slice(4, 8).readUInt32BE();
+				deviceClass = SMA_DEVICE_CLASSES.get(deviceClassId) || `unknown ${deviceClassId}`;
+				registerInverterDiscoveryIfComplete();
 			}.bind(this));
 
 			// Read serial number (U32, RAW).
 			client.readHoldingRegisters(30057, 2, function(err, data) {
 				serialNumber = data.buffer.readUInt32BE();
-				if (deviceClass && firmwareRevision) {
-					this.discovered.inverter = {
-						DeviceClass: deviceClass,
-						SerialNumber: serialNumber,
-						FirmwareRevision: firmwareRevision,
-					};
-				}
+				registerInverterDiscoveryIfComplete();
 			}.bind(this));
 
 			//  Read firmware version (U32, FW).
 			client.readHoldingRegisters(40065, 2, function(err, data) {
 				// TRICKY: some inverters don't expose the firmware version: SBn.n-1AV-40.
 				if (data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
-					const firmwareRevision = 'unknown';
-					if (deviceClass && serialNumber) {
-						this.discovered.inverter = {
-							DeviceClass: deviceClass,
-							SerialNumber: serialNumber,
-							FirmwareRevision: firmwareRevision,
-						};
-					}
+					firmwareRevision = 'unknown';
+					registerInverterDiscoveryIfComplete();
 					return;
 				}
 
@@ -454,13 +449,8 @@ SMAHomeManager.prototype = {
 						releaseType = 'S(pecial release)';
 						break;
 				}
-				const firmwareRevision = major + '.' + minor + '.' + build + '.' + releaseType;
-				if (serialNumber) {
-					this.discovered.inverter = {
-						SerialNumber: serialNumber,
-						FirmwareRevision: firmwareRevision,
-					};
-				}
+				firmwareRevision = major + '.' + minor + '.' + build + '.' + releaseType;
+				registerInverterDiscoveryIfComplete();
 			}.bind(this));
 	},
 
