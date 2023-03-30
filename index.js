@@ -7,15 +7,22 @@ const PLATFORM = 'SMAHomeManager';
 const PACKAGE = require('./package.json');
 const PLUGIN_NAME = PACKAGE.name;
 
+// Massage METADATA into useful data structures.
+// @see https://files.sma.de/downloads/ClusterController_MODBUS-TI-en-18.pdf
+const METADATA = require('./metadata.json');
+const arrayToMap = (array) => {
+	return JSON.parse(
+		JSON.stringify(array),
+		(key, value) => (key === "" ? new Map(value) : value),
+	);
+}
+const SMA_DEVICE_CLASSES = arrayToMap(METADATA.DEVICE_CLASSES);
+
 // See SMA-Modbus-general-TI-en-10.pdf.
 const SMA_MODBUS_CLIENT_ID = 3;
 // In that same PDF, see "3.5.7 SMA Data Types and NaN Values".
 const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
 const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
-
-// See SMA_Modbus-TI-en-23.xlsx.
-const SMA_DEVICE_CLASS_SOLAR_INVERTER = 8001;
-const SMA_DEVICE_CLASS_BATTERY_INVERTER = 8007;
 
 var client = new ModbusRTU();
 var bonjour = new Bonjour();
@@ -223,7 +230,7 @@ function SMAHomeManager(log, config, api) {
 
 				// For now, only solar inverters are supported.
 				if (this.discovered.inverter.DeviceClass !== 'solar inverter') {
-					this.log.error('The discovered inverter is not a solar inverter! Please create a bug report with as much detail as possible.');
+					this.log.error('The discovered inverter is not a solar inverter! Please create a bug report with as much detail as possible.', this.discovered);
 					// Stop listening to SMA Home Manager.
 					if (this.socket) {
 						this.socket.close();
@@ -379,17 +386,8 @@ SMAHomeManager.prototype = {
 
 			// Read device class (U32, ENUM).
 			client.readHoldingRegisters(30051, 2, function(err, data) {
-				switch (data.buffer.readUInt32BE()) {
-					case SMA_DEVICE_CLASS_SOLAR_INVERTER:
-						deviceClass = 'solar inverter';
-						break;
-					case SMA_DEVICE_CLASS_BATTERY_INVERTER:
-						deviceClass = 'battery inverter';
-						break;
-					default:
-						deviceClass = 'unknown';
-						break;
-				}
+				const deviceClassId = data.buffer.readUInt32BE();
+				deviceClass = SMA_DEVICE_CLASSES.get(deviceClassId) || `unknown ${deviceClassId}`;
 				if (serialNumber && firmwareRevision) {
 					this.discovered.inverter = {
 						DeviceClass: deviceClass,
