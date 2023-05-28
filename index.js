@@ -628,8 +628,12 @@ SMAHomeManager.prototype = {
 			production: producedWattsFromInverter,
 			consumption: importWatts + producedWattsFromInverter - exportWatts,
 		};
-		if (estimatedMsOffsetInverter > 1000 || measurement.consumption < 0) {
+		if (estimatedMsOffsetInverter > 1000) {
 			this.log.warn(`Inverter took ${estimatedMsOffsetInverter} ms to respond, resulting in an invalid measurement. Dropping measurement.`);
+			return;
+		}
+		if (measurement.consumption < 0) {
+			this.log.warn(`Timing problem: ${measurement.consumption} (which is <0) reported. Measurement details: ${JSON.stringify(measurement)}. Dropping measurement`);
 			return;
 		}
 
