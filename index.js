@@ -44,7 +44,7 @@ function SMAHomeManager(log, config, api) {
 	// Validate configuration, since `homebridge-config-ui-x` is optional.
 	['signals', 'surplusSignals'].forEach(requiredTopLevelKey => {
 		if (!Object.keys(config).includes(requiredTopLevelKey)) {
-			log.warning(`Invalid configuration: ${requiredTopLevelKey} key is missing. See config.schema.json.`);
+			log.warn(`Invalid configuration: ${requiredTopLevelKey} key is missing. See config.schema.json.`);
 			return;
 		}
 	});
