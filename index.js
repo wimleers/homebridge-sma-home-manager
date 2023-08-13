@@ -42,12 +42,14 @@ module.exports = function(homebridge) {
 
 function SMAHomeManager(log, config, api) {
 	// Validate configuration, since `homebridge-config-ui-x` is optional.
-	['signals', 'surplusSignals'].forEach(requiredTopLevelKey => {
-		if (!Object.keys(config).includes(requiredTopLevelKey)) {
-			log.warn(`Invalid configuration: ${requiredTopLevelKey} key is missing. See config.schema.json.`);
-			return;
-		}
-	});
+	if (!Object.keys(config).includes('signals')) {
+	  log.warn(`Invalid configuration: signals key is missing. See config.schema.json.`);
+	  return;
+	}
+	if (!Object.keys(config).includes('surplusSignals')) {
+	  log.warn(`Invalid configuration: surplusSignals key is missing. See config.schema.json.`);
+	  return;
+	}
 
 	this.log = log;
 
