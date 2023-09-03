@@ -41,16 +41,6 @@ module.exports = function(homebridge) {
 };
 
 function SMAHomeManager(log, config, api) {
-	// Validate configuration, since `homebridge-config-ui-x` is optional.
-	if (!Object.keys(config).includes('signals')) {
-	  log.warn(`Invalid configuration: signals key is missing. See config.schema.json.`);
-	  return;
-	}
-	if (!Object.keys(config).includes('surplusSignals')) {
-	  log.warn(`Invalid configuration: surplusSignals key is missing. See config.schema.json.`);
-	  return;
-	}
-
 	this.log = log;
 
 	// Platform state.
@@ -110,7 +100,7 @@ function SMAHomeManager(log, config, api) {
 
 	// Functionality on top of both the inverter & energy manager.
 	this.signalsConfig = {
-		builtIn: config.signals,
+		builtIn: config.signals || [],
 		surplus: config.surplusSignals || [],
 	};
 	// For small variations, like lights etc, which should be excluded from the PV surplus.
