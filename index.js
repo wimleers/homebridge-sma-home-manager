@@ -24,6 +24,8 @@ const SMA_MODBUS_CLIENT_ID = 3;
 // In that same PDF, see "3.5.7 SMA Data Types and NaN Values".
 const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
 const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
+// For now, only solar & hybrid inverters are supported.
+const SMA_SUPPORTED_DEVICE_CLASSES = ['solar inverter', 'hybrid inverter'];
 
 // Speedwire discovery: every SMA device with Speedwire answers this query,
 // with a response that starts with this prefix.
@@ -239,7 +241,7 @@ function SMAHomeManager(log, config, api) {
 				this.accessoriesCallback = false;
 
 				// For now, only solar & hybrid inverters are supported.
-				if (!['solar inverter', 'hybrid inverter'].includes(this.discovered.inverter.DeviceClass)) {
+				if (!SMA_SUPPORTED_DEVICE_CLASSES.includes(this.discovered.inverter.DeviceClass)) {
 					this.log.error('The discovered inverter is not a solar or hybrid inverter! Please create a bug report with as much detail as possible.', this.discovered);
 					// Stop listening to SMA Home Manager.
 					if (this.socket) {
@@ -348,7 +350,7 @@ SMAHomeManager.prototype = {
 		// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/25#issuecomment-2889060110
 		// @see https://github.com/onlxltd/bonjour-service/blob/74aa9de5e896cb185ba69711ab0288219cd1adfe/src/lib/browser.ts#L216-L237
 		// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/19#issuecomment-1832356668
-		bonjour.find({ type: 'http' }, function (service) {
+		bonjour.find({ type: 'http' }, async function (service) {
 			// Robustness principle: match both SMA123456789.local as well as
 			// SMA123456789-3.local (observed IRL!).
 			const hostMatch = service.host.match(/SMA\d+/);
@@ -356,13 +358,26 @@ SMAHomeManager.prototype = {
 			const nameMatch = service.name.startsWith('Website for SMA-Inverter');
 			if (hostMatch && nameMatch) {
 				this.log.debug('Found inverter DNS-SD service:', service);
+				const address = service.referer.address;
+				if (address === this.inverterAddress) {
+					return;
+				}
+				// Not every matching device is a solar or hybrid inverter, e.g. a
+				// battery inverter matches too.
+				// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/20
+				// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/21
+				const deviceClass = await this._readDeviceClass(address);
+				if (!SMA_SUPPORTED_DEVICE_CLASSES.includes(deviceClass)) {
+					this.log.debug(`mDNS/DNS-SD: ignoring ${address}, not a solar or hybrid inverter (${deviceClass}).`);
+					return;
+				}
 				const previousAddress = this.inverterAddress;
-				this.inverterAddress = service.referer.address;
+				this.inverterAddress = address;
 				if (previousAddress === null) {
-					this.log.warn(`Found inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address} via mDNS/DNS-SD.`);
+					this.log.warn(`Found inverter ${hostMatch[0]} (${deviceClass}) at ${service.host} with ${service.referer.family} address ${service.referer.address} via mDNS/DNS-SD.`);
 					callback();
 				}
-				else if (previousAddress !== this.inverterAddress) {
+				else if (previousAddress !== address) {
 					// bonjour.destroy() is not called: keeps this.inverterAddress up-to-date.
 					this.log.warn(`Detected a restarted inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address} via mDNS/DNS-SD. Next inverter reconnection will use this address.`);
 				}
@@ -404,7 +419,7 @@ SMAHomeManager.prototype = {
 			verifying.add(address);
 			const deviceClass = await this._readDeviceClass(address);
 			verifying.delete(address);
-			if (!['solar inverter', 'hybrid inverter'].includes(deviceClass)) {
+			if (!SMA_SUPPORTED_DEVICE_CLASSES.includes(deviceClass)) {
 				this.log.debug(`Speedwire discovery: ignoring ${address}, not a solar or hybrid inverter (${deviceClass}).`);
 				return;
 			}
