@@ -25,6 +25,13 @@ const SMA_MODBUS_CLIENT_ID = 3;
 const SMA_MODBUS_S32_NAN_VALUE = Buffer.from([0x80, 0x00, 0x00, 0x00]);
 const SMA_MODBUS_U32_NAN_VALUE = Buffer.from([0xFF, 0xFF, 0xFF, 0xFF]);
 
+// Speedwire discovery: every SMA device with Speedwire answers this query,
+// with a response that starts with this prefix.
+// @see https://developer.sma.de/fileadmin/content/www.developer.sma.de/docs/SpeedwireDD-TI-en-10.pdf, section 3. Discovery Query and Discovery Response
+const SPEEDWIRE_DISCOVERY_QUERY = Buffer.from('534d4100000402a0ffffffff0000002000000000', 'hex');
+const SPEEDWIRE_DISCOVERY_RESPONSE_PREFIX = Buffer.from('534d4100000402a000000001000200000001', 'hex');
+const SPEEDWIRE_DISCOVERY_INTERVAL_MS = 30 * 1000;
+
 var client = new ModbusRTU();
 var bonjour = new Bonjour();
 
@@ -74,7 +81,8 @@ function SMAHomeManager(log, config, api) {
 	// Inverter: SMA Sunny Boy.
 	// Its link-local address 169.254.12.3 unfortunately does not work on Linux.
 	// Also, SMA decided to use it to commission devices other than inverters,
-	// making it an unreliable mechanism. Use mDNS/DNS-SD to discover its address.
+	// making it an unreliable mechanism. Use mDNS/DNS-SD and Speedwire discovery
+	// to discover its address.
 	// @see _findInverter()
 	this.inverterAddress = null;
 	this.inverterModBusConnectionLive = false;
@@ -210,7 +218,8 @@ function SMAHomeManager(log, config, api) {
 	inherits(Service.CustomEnergySignal, Service);
 	Service.CustomEnergySignal.UUID = '30000000-0000-1000-8000-000019880120';
 
-	// Find SMA inverter via mDNS/DNS-SD, then connect to it via ModBus.
+	// Find SMA inverter via mDNS/DNS-SD or Speedwire discovery, then connect to it
+	// via ModBus.
 	this._findInverter(function() {
 		this._connectToInverter();
 	}.bind(this));
@@ -328,8 +337,17 @@ SMAHomeManager.prototype = {
 	},
 
 	_findInverter: function(callback) {
-		this.log.debug('Finding inverter using mDNS/DNS-SD…');
-		let firstMatch = true;
+		this.log.debug('Finding inverter using mDNS/DNS-SD & Speedwire discovery…');
+
+		// 1. mDNS/DNS-SD.
+		// TRICKY: not every SMA inverter is found this way:
+		// - a Sunny Boy Smart Energy (SBSE3.6-50) advertises
+		//   "Website for SMA-Product: SMA<serial>", and only with a PTR record,
+		//   which bonjour-service never reports
+		// - older inverters, e.g. a Sunny Boy 2.5, do not advertise at all
+		// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/25#issuecomment-2889060110
+		// @see https://github.com/onlxltd/bonjour-service/blob/74aa9de5e896cb185ba69711ab0288219cd1adfe/src/lib/browser.ts#L216-L237
+		// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/19#issuecomment-1832356668
 		bonjour.find({ type: 'http' }, function (service) {
 			// Robustness principle: match both SMA123456789.local as well as
 			// SMA123456789-3.local (observed IRL!).
@@ -338,18 +356,95 @@ SMAHomeManager.prototype = {
 			const nameMatch = service.name.startsWith('Website for SMA-Inverter');
 			if (hostMatch && nameMatch) {
 				this.log.debug('Found inverter DNS-SD service:', service);
+				const previousAddress = this.inverterAddress;
 				this.inverterAddress = service.referer.address;
-				if (firstMatch) {
-					firstMatch = false;
-					this.log.warn(`Found inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address}.`);
+				if (previousAddress === null) {
+					this.log.warn(`Found inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address} via mDNS/DNS-SD.`);
 					callback();
 				}
-				else {
+				else if (previousAddress !== this.inverterAddress) {
 					// bonjour.destroy() is not called: keeps this.inverterAddress up-to-date.
-					this.log.warn(`Detected a restarted inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address}. Next inverter reconnection will use this address.`);
+					this.log.warn(`Detected a restarted inverter ${hostMatch[0]} at ${service.host} with ${service.referer.family} address ${service.referer.address} via mDNS/DNS-SD. Next inverter reconnection will use this address.`);
 				}
 			}
 		}.bind(this));
+
+		// 2. Speedwire discovery: SMA's documented mechanism, answered by every SMA
+		// device with Speedwire. Responses are sent either to the querying socket,
+		// or to the multicast group (received by _listenToHomeManager()). Use a
+		// dedicated socket: other software on this host may also listen on the
+		// Speedwire port, and then only one of them receives unicast responses.
+		// Repeated until an inverter is found, because inverters are offline at
+		// night and do not necessarily announce themselves when they wake up.
+		// @see https://developer.sma.de/fileadmin/content/www.developer.sma.de/docs/SpeedwireDD-TI-en-10.pdf, section 3. Discovery Query and Discovery Response
+		const socket = dgram.createSocket({type: 'udp4', reuseAddr: true});
+		const verifying = new Set();
+		const ask = function() {
+			if (this.inverterAddress !== null) {
+				clearInterval(intervalId);
+				this.onSpeedwireDiscoveryResponse = null;
+				socket.close();
+				return;
+			}
+			this.log.debug('Sending Speedwire discovery query.');
+			socket.send(SPEEDWIRE_DISCOVERY_QUERY, this.homeManagerPort, this.homeManagerAddress);
+		}.bind(this);
+		const intervalId = setInterval(ask, SPEEDWIRE_DISCOVERY_INTERVAL_MS);
+		this.onSpeedwireDiscoveryResponse = async function(msg, rinfo) {
+			// The IP address is that of the responding device.
+			const address = rinfo.address;
+			if (!this._isSpeedwireDiscoveryResponse(msg) || this.inverterAddress !== null || verifying.has(address)) {
+				return;
+			}
+			// Every SMA device answers, including the SMA Home Manager and battery
+			// inverters: only accept solar & hybrid inverters. Their device class
+			// can be read over ModBus, now that their IP address is known.
+			// @see https://developer.sma.de/fileadmin/content/www.developer.sma.de/docs/SpeedwireDD-TI-en-10.pdf, section 2.2 Speedwire Device Discovery
+			// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/20
+			verifying.add(address);
+			const deviceClass = await this._readDeviceClass(address);
+			verifying.delete(address);
+			if (!['solar inverter', 'hybrid inverter'].includes(deviceClass)) {
+				this.log.debug(`Speedwire discovery: ignoring ${address}, not a solar or hybrid inverter (${deviceClass}).`);
+				return;
+			}
+			if (this.inverterAddress === null) {
+				this.inverterAddress = address;
+				this.log.warn(`Found inverter (${deviceClass}) at ${address} via Speedwire discovery.`);
+				callback();
+			}
+		}.bind(this);
+		socket.on('error', function(err) {
+			this.log.warn('Speedwire discovery failed (mDNS/DNS-SD discovery continues):', err.message);
+			clearInterval(intervalId);
+			this.onSpeedwireDiscoveryResponse = null;
+		}.bind(this));
+		socket.on('message', this.onSpeedwireDiscoveryResponse);
+		socket.bind(0, ask);
+	},
+
+	_isSpeedwireDiscoveryResponse: function(msg) {
+		const prefix = SPEEDWIRE_DISCOVERY_RESPONSE_PREFIX;
+		return msg.length >= prefix.length && msg.slice(0, prefix.length).equals(prefix);
+	},
+
+	// Reads the device class over ModBus, using a separate short-lived connection.
+	_readDeviceClass: async function(address) {
+		const probe = new ModbusRTU();
+		try {
+			probe.setTimeout(5000);
+			await probe.connectTCP(address, { port: 502 });
+			probe.setID(SMA_MODBUS_CLIENT_ID);
+			const data = await probe.readHoldingRegisters(30051, 2);
+			const deviceClassId = data.buffer.readUInt32BE();
+			return SMA_DEVICE_CLASSES.get(deviceClassId) || `unknown ${deviceClassId}`;
+		}
+		catch (err) {
+			return `ModBus: ${err.code || err.message || err}`;
+		}
+		finally {
+			probe.close(() => {});
+		}
 	},
 
 	_connectToInverter: function() {
@@ -584,6 +679,14 @@ SMAHomeManager.prototype = {
 		}.bind(this));
 
 		this.socket.on('message', function(msg, rinfo) {
+			// Speedwire discovery queries (e.g. ours) & responses.
+			// @see _findInverter()
+			if (msg.equals(SPEEDWIRE_DISCOVERY_QUERY) || this._isSpeedwireDiscoveryResponse(msg)) {
+				if (this.onSpeedwireDiscoveryResponse) {
+					this.onSpeedwireDiscoveryResponse(msg, rinfo);
+				}
+				return;
+			}
 			if (!this._isValidDatagram(msg)) {
 				return;
 			}
