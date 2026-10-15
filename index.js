@@ -88,15 +88,25 @@ function SMAHomeManager(log, config, api) {
 	// @see _findInverter()
 	this.inverterAddress = null;
 	this.inverterModBusConnectionLive = false;
-	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579.
-	// Consequently, today's "net export" and "net import" need to be computed
-	// from total net export ("feed in counter", 30583) & total net import
-	// ("grid counter", 30581)… also persist this across restarts.
+	// TRICKY: SMA decided to not populate ModBus registers 30577 & 30579. Some
+	// inverters (e.g. SBSE3.6-50) also do not populate today's yield (30535),
+	// nor the grid counters (30581 & 30583).
+	// Consequently, today's numbers need to be computed from the totals at the
+	// start of the day:
+	// - total net import & total net export: the SMA Home Manager's energy meter
+	//   readings, see _parseDatagram()
+	// - total production: the inverter's total yield (30529)
+	// … also persist this across restarts.
+	// @see https://github.com/wimleers/homebridge-sma-home-manager/issues/29
 	const cachedToday = this.storage.getItemSync(PLUGIN_NAME + 'computedToday');
-	this.computedToday = cachedToday !== undefined
+	// Discard what earlier versions persisted: it was computed from the
+	// inverter's grid counters, which may be NaN.
+	this.computedToday = cachedToday !== undefined && cachedToday.start.totalProduction !== undefined
 		? cachedToday
-		: { day: -1, missedSeconds: -1, start: { totalExport: -1, totalImport: -1 }, now: { totalExport: -1, totalImport: -1 } };
+		: { day: -1, missedSeconds: -1, start: { totalExport: -1, totalImport: -1, totalProduction: -1 }, now: { totalExport: -1, totalImport: -1, totalProduction: -1 } };
 	this.storage.setItemSync(PLUGIN_NAME + 'computedToday', this.computedToday);
+	// The SMA Home Manager's most recent total import & export, in kWh.
+	this.homeManagerTotals = null;
 
 	// Energy manager: SMA Home Manager 2.0.
 	this.homeManagerAddress = '239.12.255.254';
@@ -572,10 +582,14 @@ SMAHomeManager.prototype = {
 		try {
 			// Ensure this.computedToday remains up-to-date.
 			const date = new Date();
-			client.readHoldingRegisters(30581, 4).then((data) => {
+			// Total yield (Wh, U32, FIX0: 0 decimals).
+			client.readHoldingRegisters(30529, 2).then((data) => {
+				if (this.homeManagerTotals === null) {
+					return;
+				}
 				const currentTotals = {
-					totalImport: data.buffer.slice(0, 4).readUInt32BE() / 1000, // Wh, U32, FIX0: 0 decimals
-					totalExport: data.buffer.slice(4, 8).readUInt32BE() / 1000, // Wh, U32, FIX0: 0 decimals
+					...this.homeManagerTotals,
+					totalProduction: data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE) ? null : data.buffer.readUInt32BE() / 1000,
 				};
 				if (this.computedToday.day != date.getDate()) {
 					this.computedToday = {
@@ -585,7 +599,7 @@ SMAHomeManager.prototype = {
 						start: currentTotals,
 						now: currentTotals,
 					};
-					this.log.info('New day! Retrieved total import & export at', date, this.computedToday);
+					this.log.info('New day! Retrieved total import, export & production at', date, this.computedToday);
 					this.storage.setItemSync(PLUGIN_NAME + 'computedToday', this.computedToday);
 				}
 				else {
@@ -637,17 +651,21 @@ SMAHomeManager.prototype = {
 
 			// Eve - kWh (Wh, U32, FIX0: 0 decimals)
 			client.readHoldingRegisters(30535, 2, function(err, data) {
-				let productionToday = 0;
-				if (!data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
-					productionToday = data.buffer.readUInt32BE() / 1000;
-				}
-
 				if (this.computedToday.day == -1) {
 					this.log.debug('Cannot update "Today" until necessary metadata is retrieved from inverter.')
 					return;
 				}
 
 				// Compute today's numbers up to now.
+				// Prefer today's yield, but not every inverter populates it.
+				const { start, now } = this.computedToday;
+				let productionToday = 0;
+				if (!data.buffer.equals(SMA_MODBUS_U32_NAN_VALUE)) {
+					productionToday = data.buffer.readUInt32BE() / 1000;
+				}
+				else if (start.totalProduction !== null && now.totalProduction !== null) {
+					productionToday = now.totalProduction - start.totalProduction;
+				}
 				const exportToday = this.computedToday.now.totalExport - this.computedToday.start.totalExport;
 				const importToday = this.computedToday.now.totalImport - this.computedToday.start.totalImport;
 
@@ -1006,6 +1024,7 @@ SMAHomeManager.prototype = {
 
 		var data = msg.slice(28, -4);
 		var netWatts = null;
+		var totals = {};
 		do {
 			// Read OBIS header.
 			const [measurementType, measuredValueIndex, byteCount] = this._getChannelTypeFromObisHeader(data.slice(0, 4));
@@ -1024,6 +1043,15 @@ SMAHomeManager.prototype = {
 					}
 				}
 			}
+			// Energy meter readings (in Ws): total net import (1:1.8.0) & total net
+			// export (1:2.8.0).
+			// @see https://developer.sma.de/fileadmin/content/www.developer.sma.de/docs/EMETER-Protokoll-TI-en-10.pdf, sections 3.1 Defined Channels and 3.3 Resolution of the Measured Values
+			if (measurementType === 'meter') {
+				if (measuredValueIndex === 1 || measuredValueIndex === 2) {
+					const kWh = Number(data.slice(0, 8).readBigUInt64BE()) / 3600 / 1000;
+					totals[measuredValueIndex === 1 ? 'totalImport' : 'totalExport'] = kWh;
+				}
+			}
 			if (measurementType === 'version' && !this.launched && !this.discovered.energyManager) {
 				const version = data.slice(0, 1).readUint8() + '.' + data.slice(1, 2).readUint8() + '.' + data.slice(2, 3).readUint8() + '.' + data.slice(3, 4).toString();
 				this.discovered.energyManager = {
@@ -1034,6 +1062,10 @@ SMAHomeManager.prototype = {
 			// Proceed to next measuring point.
 			data = data.slice(byteCount);
 		} while (data.length > 0);
+
+		if (totals.totalImport !== undefined && totals.totalExport !== undefined) {
+			this.homeManagerTotals = totals;
+		}
 
 		/*
 		// Debugging.
